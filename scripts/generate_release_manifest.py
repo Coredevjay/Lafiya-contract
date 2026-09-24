@@ -218,6 +218,13 @@ def build_compatibility():
 def generate(previous_manifest):
     contracts = build_contracts()
     contracts_by_name = {c["name"]: c for c in contracts}
+    catalog = {
+        path.stem: {
+            "path": str(path.relative_to(ROOT)),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        for path in sorted((ROOT / "catalog").glob("*.json"))
+    }
     try:
         git_tag = run_git("describe", "--tags", "--exact-match", "HEAD")
     except subprocess.CalledProcessError:
@@ -235,6 +242,7 @@ def generate(previous_manifest):
         "events": build_events(previous_manifest),
         "deployments": build_deployments(contracts_by_name),
         "compatibility": build_compatibility(),
+        "catalog": catalog,
     }
 
 

@@ -91,8 +91,10 @@ pub const BATCH_LIMIT: u32 = 40;
 pub enum Error {
     /// `initialize` has not been called yet; call
     /// `initialize(admin: Address)` before using the contract.
+    /// @severity operator
     NotInitialized = 1,
     /// `initialize` was called more than once.
+    /// @severity operator
     AlreadyInitialized = 2,
     /// `accept_admin` was called with no pending admin transfer. Admin transfer is a
     /// two-step flow: the current admin must first call `propose_admin` to nominate a
@@ -108,6 +110,7 @@ pub enum Error {
     /// `>= SCHEMA_VERSION`. Only call `migrate()` after `upgrade()` to a
     /// build that bumps `SCHEMA_VERSION`; this error is a safe no-op signal
     /// that there is nothing pending, not a failure to react to.
+    /// @severity operator
     MigrationNotRequired = 6,
     /// The referenced attester is not currently allowlisted (never added,
     /// or since removed).
