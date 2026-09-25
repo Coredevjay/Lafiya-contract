@@ -15,6 +15,8 @@ use lafiya_config::{
 };
 use std::path::PathBuf;
 
+mod submit;
+
 /// Env var holding the stellar CLI identity used as transaction source.
 const ENV_SOURCE: &str = "STELLAR_ACCOUNT";
 /// Env var holding the contract admin address.
@@ -33,6 +35,12 @@ struct Cli {
     /// Path to networks.toml (auto-discovers by default)
     #[arg(long, global = true)]
     config: Option<PathBuf>,
+
+    /// Ledgers a state-changing transaction stays valid for (its maxLedger
+    /// is latest + this). After that it can never be included and is safely
+    /// rebuilt. Default is about 5 minutes.
+    #[arg(long, default_value_t = lafiya_rpc_resilience::DEFAULT_LEDGER_WINDOW, global = true)]
+    ledger_window: u32,
 
     #[command(subcommand)]
     command: Commands,
@@ -261,7 +269,7 @@ fn main() -> anyhow::Result<()> {
                     "add_attester",
                     &["--attester", &address],
                 );
-                run_stellar(args)?;
+                submit::run_bounded(&network_cfg, args, cli.ledger_window)?;
             }
             AttesterSub::Remove { address, source } => {
                 let contract_id = network_cfg
@@ -278,7 +286,7 @@ fn main() -> anyhow::Result<()> {
                     "remove_attester",
                     &["--attester", &address],
                 );
-                run_stellar(args)?;
+                submit::run_bounded(&network_cfg, args, cli.ledger_window)?;
             }
         },
         Commands::Attestation { sub } => match sub {

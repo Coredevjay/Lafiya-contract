@@ -7,3 +7,9 @@ license = "MIT"
 repository = "https://github.com/Lafiya-xyz/Lafiya-contract"
 
 [dependencies]
+stellar-xdr = { version = "27.0.0", default-features = false, features = ["std", "base64"], optional = true }
+
+[features]
+# Ledger-bound helpers for real transaction envelopes (issue #407). Off by
+# default so the state machine stays dependency-free.
+xdr = ["dep:stellar-xdr"]
