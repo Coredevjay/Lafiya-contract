@@ -3,27 +3,76 @@ name: Docs Build
 on:
   push:
     branches: [ main ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  MDBOOK_VERSION: "v0.5.4"
+  LYCHEE_VERSION: "lychee-v0.24.2"
 
 jobs:
   docs:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
-      - name: Build docs
+          targets: wasm32v1-none
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install mdBook and lychee
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL "https://github.com/rust-lang/mdBook/releases/download/${MDBOOK_VERSION}/mdbook-${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin"
+          curl -fsSL "https://github.com/lycheeverse/lychee/releases/download/${LYCHEE_VERSION}/lychee-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" --strip-components=1 lychee-x86_64-unknown-linux-gnu/lychee
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Fails if the generated contract/CLI reference drifted, then stages the book source.
+      - name: Check generated reference and stage book
+        run: cargo xtask docs --check
+
+      - name: Build rustdoc
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+
+      - name: Build site
+        run: |
+          mdbook build docs
+          cp -r target/doc target/book/api
+
+      - name: Check links
+        run: lychee --offline --no-progress --root-dir "$PWD/target/book" --exclude-path target/book/api 'target/book/**/*.html'
+
+      # Each version lives in its own directory: `main/` for pushes to main,
+      # `vX.Y.Z/` for tags. versions.json feeds the version picker and the
+      # site root redirects to the newest release (or main before the first).
+      - name: Assemble versioned site
+        if: github.event_name == 'push'
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          git fetch origin gh-pages --depth=1 && git worktree add pages origin/gh-pages || mkdir -p pages
+          rm -rf "pages/${VERSION}"
+          cp -r target/book "pages/${VERSION}"
+          cd pages
+          versions=$(find . -maxdepth 1 -mindepth 1 -type d \( -name main -o -name 'v*' \) -printf '%f\n' \
+            | sort -rV | awk '$0 != "main"'; if [ -d main ]; then echo main; fi)
+          printf '%s\n' "$versions" | jq -R . | jq -s . > versions.json
+          latest=$(head -n1 <<< "$versions")
+          printf '<!doctype html><meta http-equiv="refresh" content="0; url=%s/"><a href="%s/">Lafiya docs</a>\n' \
+            "$latest" "$latest" > index.html
+          touch .nojekyll
+          rm -rf .git
+
       - name: Deploy to GitHub Pages
         if: github.event_name == 'push'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: target/doc
-          destination_dir: .
+          publish_dir: pages

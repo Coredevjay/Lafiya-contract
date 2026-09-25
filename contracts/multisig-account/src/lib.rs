@@ -114,7 +114,7 @@ impl CustomAccountInterface for MultisigAccount {
     /// # Arguments
     /// * `signature_payload` — A 32-byte hash of the transaction to authorize.
     /// * `signatures` — A vector of ed25519 signatures, each with a public key and signature bytes, ordered by ascending public key.
-    /// * `_auth_contexts` — Intentionally unused; see [ADR-0007](../adr/0007-unscoped-multisig-authorization.md) for why this account does not scope authorization to specific contracts or functions during pre-alpha.
+    /// * `_auth_contexts` — Intentionally unused; see [ADR-0007](../../../docs/adr/0007-unscoped-multisig-authorization.md) for why this account does not scope authorization to specific contracts or functions during pre-alpha.
     fn __check_auth(
         env: Env,
         signature_payload: Hash<32>,

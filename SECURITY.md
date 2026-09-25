@@ -54,7 +54,7 @@ Out of scope:
   toolchain themselves — report those upstream.
 - The `lafiya-web` app and other sibling repositories (they have, or
   will have, their own policies); see the README's
-  [Lafiya Organization](README.md#lafiya-organization) section.
+  [Lafiya Organization](docs/overview.md#lafiya-organization) section.
 
 ## Supported versions
 
