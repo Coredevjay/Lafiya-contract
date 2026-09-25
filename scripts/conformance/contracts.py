@@ -10,7 +10,7 @@ import pathlib
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 WASM_DIR = REPO_ROOT / "target" / "wasm32v1-none" / "release"
 
-CONTRACTS = {
+CONTRACTS: dict[str, dict[str, pathlib.Path]] = {
     "attester-registry": {
         "crate_dir": REPO_ROOT / "contracts" / "attester-registry",
         "wasm_path": WASM_DIR / "attester_registry.wasm",

@@ -989,3 +989,24 @@ fn revoke_attestation_clears_get_attestation_history() {
     let history_after = client.get_attestation_history(&record_hash);
     assert_eq!(history_after.len(), 0);
 }
+
+#[test]
+fn get_interface_reports_kind_versions_and_features() {
+    let (env, client, attester_registry, _admin) = setup();
+
+    let info = client.get_interface();
+    assert_eq!(
+        info.contract_kind,
+        Symbol::new(&env, "lafiya_attestation_registry")
+    );
+    assert_eq!(info.interface_version, INTERFACE_VERSION);
+    assert_eq!(info.schema_version, 1);
+    assert_eq!(info.event_version, EVENT_VERSION);
+    assert!(info.features.contains(Symbol::new(&env, "revocation")));
+
+    // Each contract reports its own kind, so wiring can be sanity-checked.
+    assert_ne!(
+        attester_registry.get_interface().contract_kind,
+        info.contract_kind
+    );
+}

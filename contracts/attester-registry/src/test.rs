@@ -655,3 +655,26 @@ fn second_propose_admin_call_overwrites_pending_proposal() {
     let result = client.try_accept_admin();
     assert_eq!(result, Ok(()));
 }
+
+#[test]
+fn get_interface_reports_kind_versions_and_features() {
+    let (env, client, admin) = setup();
+    client.initialize(&admin);
+
+    let info = client.get_interface();
+    assert_eq!(
+        info.contract_kind,
+        Symbol::new(&env, "lafiya_attester_registry")
+    );
+    assert_eq!(info.interface_version, INTERFACE_VERSION);
+    assert_eq!(info.schema_version, client.get_schema_version());
+    assert_eq!(info.event_version, EVENT_VERSION);
+    assert_eq!(info.features.len(), FEATURES.len() as u32);
+    assert!(info.features.contains(Symbol::new(&env, "suspension")));
+}
+
+#[test]
+fn get_interface_works_before_initialize() {
+    let (_, client, _) = setup();
+    assert_eq!(client.get_interface().interface_version, INTERFACE_VERSION);
+}

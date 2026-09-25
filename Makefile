@@ -1,4 +1,4 @@
-.PHONY: build test fmt fmt-check clippy wasm wasm-contracts check clean config-check config-list deploy bench conformance conformance-update
+.PHONY: build test fmt fmt-check clippy wasm wasm-contracts check clean config-check config-list deploy bench conformance conformance-update audit-env
 
 build:
 	cargo build --workspace
@@ -46,6 +46,9 @@ conformance-update: wasm-contracts
 
 clean:
 	cargo clean
+
+audit-env:
+	./scripts/audit-env.sh $(if $(DEPLOY),--deploy)
 
 bench:
 	cargo test -p attester-registry large_attester_allowlist_load -- --nocapture

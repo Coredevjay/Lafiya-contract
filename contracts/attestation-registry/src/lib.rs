@@ -5,7 +5,7 @@
 
 use soroban_sdk::{
     contract, contractclient, contracterror, contractevent, contractimpl, contracttype, Address,
-    BytesN, Env, Vec,
+    BytesN, Env, Symbol, Vec,
 };
 
 /// The subset of the `attester-registry` contract this crate calls. Kept
@@ -23,6 +23,38 @@ pub trait AttesterRegistryInterface {
 const MAX_HISTORY: u64 = 10;
 
 const SCHEMA_VERSION: u32 = 1;
+
+/// Interface kind reported by `get_interface`, used by clients as a weak
+/// identity check when wiring contracts (not proof of authenticity).
+pub const CONTRACT_KIND: &str = "lafiya_attestation_registry";
+
+/// Version of the public contract interface (functions, errors, types).
+/// Bump on any breaking ABI change; `scripts/conformance/check_snapshot.py`
+/// refuses a breaking snapshot update without a bump.
+pub const INTERFACE_VERSION: u32 = 1;
+
+/// Version of the emitted event schemas (see `docs/events.md`).
+pub const EVENT_VERSION: u32 = 1;
+
+/// Optional features this build supports, reported by `get_interface`.
+pub const FEATURES: [&str; 4] = ["pause", "history", "revocation", "repoint_registry"];
+
+/// Interface and capability metadata returned by `get_interface`, so
+/// clients can negotiate features with one call instead of probing.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InterfaceInfo {
+    /// Contract kind, e.g. `lafiya_attestation_registry`.
+    pub contract_kind: Symbol,
+    /// Public interface version; bumped on any breaking ABI change.
+    pub interface_version: u32,
+    /// Optional features enabled in this build.
+    pub features: Vec<Symbol>,
+    /// Storage schema version (stored `SchemaVersion`, default 1).
+    pub schema_version: u32,
+    /// Event schema version.
+    pub event_version: u32,
+}
 
 /// Instance storage TTL policy:
 /// - Threshold: 30 days (17280 * 30 = 518400 ledgers)
@@ -422,6 +454,27 @@ impl AttestationRegistry {
         env.storage()
             .persistent()
             .get(&DataKey::Attestation(record_hash, sequence))
+    }
+
+    /// Report the contract kind, interface version, enabled features, and
+    /// storage/event schema versions for runtime compatibility negotiation.
+    /// Callable by anyone.
+    pub fn get_interface(env: Env) -> InterfaceInfo {
+        let mut features = Vec::new(&env);
+        for feature in FEATURES {
+            features.push_back(Symbol::new(&env, feature));
+        }
+        InterfaceInfo {
+            contract_kind: Symbol::new(&env, CONTRACT_KIND),
+            interface_version: INTERFACE_VERSION,
+            features,
+            schema_version: env
+                .storage()
+                .instance()
+                .get(&DataKey::SchemaVersion)
+                .unwrap_or(1),
+            event_version: EVENT_VERSION,
+        }
     }
 
     /// Look up the full attestation history for `record_hash`, if any.

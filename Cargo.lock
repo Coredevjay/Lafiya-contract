@@ -1285,6 +1285,8 @@ dependencies = [
  "clap",
  "lafiya-config",
  "serde",
+ "serde_json",
+ "tempfile",
  "toml",
 ]
 
@@ -1360,6 +1362,7 @@ dependencies = [
  "attestation-registry",
  "attester-registry",
  "ed25519-dalek 3.0.0",
+ "proptest",
  "sha2 0.10.9",
  "soroban-sdk",
 ]
