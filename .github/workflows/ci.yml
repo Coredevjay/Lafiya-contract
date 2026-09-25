@@ -95,6 +95,26 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm test
 
+  verifier-sdk:
+    name: Verifier SDK (@lafiya/verifier)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/verifier-sdk
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm test
+      - run: pnpm run build
+      - run: pnpm run size
+
   fuzz:
     name: Fuzz (proptest, non-blocking)
     runs-on: ubuntu-latest
