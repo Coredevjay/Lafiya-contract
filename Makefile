@@ -38,11 +38,13 @@ conformance: wasm-contracts
 	python3 scripts/conformance/check_snapshot.py
 	python3 scripts/conformance/check_error_docs.py
 	python3 scripts/conformance/gen_events_doc.py --check
+	python3 scripts/conformance/gen_events_ts.py --check
 	python3 scripts/conformance/check_bindings_drift.py
 
 conformance-update: wasm-contracts
 	python3 scripts/conformance/check_snapshot.py --update
 	python3 scripts/conformance/gen_events_doc.py
+	python3 scripts/conformance/gen_events_ts.py
 
 clean:
 	cargo clean

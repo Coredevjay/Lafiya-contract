@@ -71,6 +71,30 @@ jobs:
       - name: Check README contract tables
         run: python .github/scripts/check_readme_contracts.py
 
+  events-package:
+    name: Events package (@lafiya/events)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/events
+    steps:
+      - uses: actions/checkout@v7
+      # A new or changed contract event updates the interface snapshot
+      # (enforced by `make conformance`); this fails if the TypeScript
+      # decoders were not regenerated from it.
+      - name: Check generated decoders are up to date
+        run: python3 scripts/conformance/gen_events_ts.py --check
+        working-directory: .
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm test
+
   fuzz:
     name: Fuzz (proptest, non-blocking)
     runs-on: ubuntu-latest
