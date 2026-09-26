@@ -125,6 +125,70 @@ fn remove_attester_never_added_is_a_no_op() {
 }
 
 #[test]
+fn attester_can_revoke_own_key_and_emits_event() {
+    let (env, client, admin) = setup();
+    client.initialize(&admin);
+
+    let attester = Address::generate(&env);
+    client.add_attester(&attester);
+    assert_eq!(client.get_attester_count(), 1);
+
+    client.revoke_attester(&attester);
+
+    assert!(!client.is_attester(&attester));
+    assert_eq!(client.get_attester_info(&attester), None);
+    assert_eq!(client.get_attester_status(&attester), None);
+    assert_eq!(client.get_attester_count(), 0);
+    assert_eq!(
+        env.events().all(),
+        std::vec![
+            AttesterAdded {
+                attester: attester.clone(),
+            }
+            .to_xdr(&env, &client.address),
+            AttesterRevoked { attester }.to_xdr(&env, &client.address),
+        ],
+    );
+}
+
+#[test]
+fn revoking_unknown_or_already_revoked_attester_is_idempotent() {
+    let (env, client, admin) = setup();
+    client.initialize(&admin);
+
+    let attester = Address::generate(&env);
+    client.revoke_attester(&attester);
+    client.revoke_attester(&attester);
+
+    assert_eq!(client.get_attester_count(), 0);
+    assert_eq!(
+        env.events().all(),
+        std::vec![
+            AttesterRevoked {
+                attester: attester.clone(),
+            }
+            .to_xdr(&env, &client.address),
+            AttesterRevoked { attester }.to_xdr(&env, &client.address),
+        ],
+    );
+}
+
+#[test]
+fn attester_can_revoke_own_key_while_paused() {
+    let (env, client, admin) = setup();
+    client.initialize(&admin);
+
+    let attester = Address::generate(&env);
+    client.add_attester(&attester);
+    client.pause();
+
+    client.revoke_attester(&attester);
+
+    assert!(!client.is_attester(&attester));
+    assert_eq!(client.get_attester_count(), 0);
+}
+
+#[test]
 fn add_attester_before_initialize_fails() {
     let (env, client, _admin) = setup();
     let attester = Address::generate(&env);

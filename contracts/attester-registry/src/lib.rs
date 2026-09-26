@@ -212,6 +212,14 @@ pub struct AttesterRemoved {
     pub attester: Address,
 }
 
+/// Emitted when an attester revokes its own key.
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct AttesterRevoked {
+    #[topic]
+    pub attester: Address,
+}
+
 /// Emitted when an attester is suspended.
 #[contractevent]
 #[derive(Clone, Debug)]
@@ -332,6 +340,36 @@ impl AttesterRegistry {
             new_attester,
         }
         .publish(&env);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+        Ok(())
+    }
+
+    /// Revoke the caller's own attester key immediately. This remains available
+    /// while paused so a compromised key can be stopped without admin action.
+    pub fn revoke_attester(env: Env, attester: Address) -> Result<(), Error> {
+        attester.require_auth();
+        let was_present = env
+            .storage()
+            .persistent()
+            .has(&DataKey::Attester(attester.clone()));
+        if was_present {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::Attester(attester.clone()));
+            env.storage()
+                .persistent()
+                .remove(&DataKey::Suspended(attester.clone()));
+            let count = Self::attester_count(&env);
+            if count > 0 {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::AttesterCount, &(count - 1));
+            }
+            Self::record_status_change(&env, &attester, false);
+        }
+        AttesterRevoked { attester }.publish(&env);
         env.storage()
             .instance()
             .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
