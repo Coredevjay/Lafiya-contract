@@ -40,6 +40,22 @@ enum DataKey {
     AttesterCount,
     /// Ledger timestamp at which the pending admin proposal expires.
     PendingAdminExpiresAt,
+    /// The latest successor address for a rotated attester.
+    AttesterRotation(Address),
+    /// A point-in-time attester status transition.
+    AttesterStatusChange(Address, u32),
+    /// Number of recorded status transitions for an attester.
+    AttesterStatusChangeCount(Address),
+}
+
+/// Emitted when an attester rotates its key while retaining its enrollment.
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct AttesterRotated {
+    #[topic]
+    pub previous_attester: Address,
+    #[topic]
+    pub new_attester: Address,
 }
 
 /// Metadata associated with an allowlisted attester.
@@ -50,6 +66,14 @@ pub struct AttesterInfo {
     pub license_hash: Option<BytesN<32>>,
     /// The geographic region the attester is authorized to attest for, if any.
     pub region: Option<Symbol>,
+}
+
+/// A status transition retained for point-in-time allowlist queries.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AttesterStatusChange {
+    pub timestamp: u64,
+    pub active: bool,
 }
 
 /// An allowlisted attester's metadata together with its current suspension
@@ -251,6 +275,76 @@ impl AttesterRegistry {
         Ok(())
     }
 
+    /// Rotate an allowlisted attester key without losing metadata or enrollment history.
+    /// Both the old and new addresses must authorize the operation.
+    pub fn rotate_attester(
+        env: Env,
+        previous_attester: Address,
+        new_attester: Address,
+    ) -> Result<(), Error> {
+        previous_attester.require_auth();
+        new_attester.require_auth();
+        Self::require_not_paused(&env)?;
+        if previous_attester == new_attester
+            || !env
+                .storage()
+                .persistent()
+                .has(&DataKey::Attester(previous_attester.clone()))
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::Attester(new_attester.clone()))
+        {
+            return Err(Error::AttesterNotFound);
+        }
+
+        let info: AttesterInfo = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Attester(previous_attester.clone()))
+            .ok_or(Error::AttesterNotFound)?;
+        let suspended = env
+            .storage()
+            .persistent()
+            .has(&DataKey::Suspended(previous_attester.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Attester(previous_attester.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Suspended(previous_attester.clone()));
+        env.storage()
+            .persistent()
+            .set(&DataKey::Attester(new_attester.clone()), &info);
+        if suspended {
+            env.storage()
+                .persistent()
+                .set(&DataKey::Suspended(new_attester.clone()), &true);
+        }
+        env.storage().persistent().set(
+            &DataKey::AttesterRotation(previous_attester.clone()),
+            &new_attester,
+        );
+        Self::record_status_change(&env, &previous_attester, false);
+        Self::record_status_change(&env, &new_attester, !suspended);
+        AttesterRotated {
+            previous_attester,
+            new_attester,
+        }
+        .publish(&env);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+        Ok(())
+    }
+
+    /// Return the latest address to which `attester` was rotated, if any.
+    pub fn get_attester_rotation(env: Env, attester: Address) -> Option<Address> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AttesterRotation(attester))
+    }
+
     /// Return the current admin address.
     pub fn get_admin(env: Env) -> Result<Address, Error> {
         Self::admin(&env)
@@ -413,6 +507,7 @@ impl AttesterRegistry {
         env.storage()
             .persistent()
             .set(&DataKey::Attester(attester.clone()), &info);
+        Self::record_status_change(&env, &attester, true);
         env.storage()
             .instance()
             .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
@@ -452,6 +547,7 @@ impl AttesterRegistry {
         env.storage()
             .persistent()
             .set(&DataKey::Attester(attester.clone()), &info);
+        Self::record_status_change(&env, &attester, true);
         env.storage()
             .instance()
             .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
@@ -527,6 +623,7 @@ impl AttesterRegistry {
                     region: None,
                 };
                 env.storage().persistent().set(&key, &info);
+                Self::record_status_change(&env, &attester, true);
                 count += 1;
                 AttesterAdded {
                     attester: attester.clone(),
@@ -573,6 +670,7 @@ impl AttesterRegistry {
                 if count > 0 {
                     count -= 1;
                 }
+                Self::record_status_change(&env, &attester, false);
                 AttesterRemoved {
                     attester: attester.clone(),
                 }
@@ -612,6 +710,7 @@ impl AttesterRegistry {
                     .instance()
                     .set(&DataKey::AttesterCount, &(count - 1));
             }
+            Self::record_status_change(&env, &attester, false);
         }
         AttesterRemoved { attester }.publish(&env);
         env.storage()
@@ -662,6 +761,7 @@ impl AttesterRegistry {
         env.storage()
             .persistent()
             .set(&DataKey::Suspended(attester.clone()), &true);
+        Self::record_status_change(&env, &attester, false);
         AttesterSuspended { attester }.publish(&env);
         env.storage()
             .instance()
@@ -696,6 +796,29 @@ impl AttesterRegistry {
         !env.storage()
             .persistent()
             .has(&DataKey::Suspended(attester))
+    }
+
+    /// Whether `attester` was active at the supplied ledger timestamp.
+    pub fn is_attester_at(env: Env, attester: Address, timestamp: u64) -> bool {
+        let count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AttesterStatusChangeCount(attester.clone()))
+            .unwrap_or(0);
+        let mut active = false;
+        for sequence in 1..=count {
+            let change: Option<AttesterStatusChange> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::AttesterStatusChange(attester.clone(), sequence));
+            if let Some(change) = change {
+                if change.timestamp > timestamp {
+                    break;
+                }
+                active = change.active;
+            }
+        }
+        active
     }
 
     /// Get the optional metadata associated with `attester` if they are allowlisted.
@@ -813,6 +936,26 @@ impl AttesterRegistry {
             .instance()
             .get(&DataKey::AttesterCount)
             .unwrap_or(0)
+    }
+
+    fn record_status_change(env: &Env, attester: &Address, active: bool) {
+        let count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AttesterStatusChangeCount(attester.clone()))
+            .unwrap_or(0);
+        let sequence = count + 1;
+        env.storage().persistent().set(
+            &DataKey::AttesterStatusChange(attester.clone(), sequence),
+            &AttesterStatusChange {
+                timestamp: env.ledger().timestamp(),
+                active,
+            },
+        );
+        env.storage().persistent().set(
+            &DataKey::AttesterStatusChangeCount(attester.clone()),
+            &sequence,
+        );
     }
 }
 
