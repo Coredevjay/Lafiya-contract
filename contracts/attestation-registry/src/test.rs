@@ -243,7 +243,15 @@ fn attest_emits_event() {
     };
     assert_eq!(
         env.events().all(),
-        std::vec![expected_event.to_xdr(&env, &client.address)],
+        std::vec![
+            AdminTransferProposed {
+                current_admin: admin.clone(),
+                proposed_admin: new_admin.clone(),
+                expires_at: 30 * 24 * 60 * 60,
+            }
+            .to_xdr(&env, &client.address),
+            expected_event.to_xdr(&env, &client.address)
+        ],
     );
 }
 

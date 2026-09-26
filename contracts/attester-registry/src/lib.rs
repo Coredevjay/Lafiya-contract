@@ -9,6 +9,7 @@ use soroban_sdk::{
 };
 
 const SCHEMA_VERSION: u32 = 1;
+const ADMIN_PROPOSAL_TTL_SECONDS: u64 = 30 * 24 * 60 * 60;
 
 /// Storage keys for the attester registry.
 ///
@@ -37,6 +38,8 @@ enum DataKey {
     MaxAttesters,
     /// Current count of allowlisted attesters.
     AttesterCount,
+    /// Ledger timestamp at which the pending admin proposal expires.
+    PendingAdminExpiresAt,
 }
 
 /// Metadata associated with an allowlisted attester.
@@ -114,6 +117,10 @@ pub enum Error {
     AttesterNotFound = 7,
     /// The supplied batch exceeds `BATCH_LIMIT` addresses.
     BatchTooLarge = 8,
+    /// The proposed admin address is not a valid successor.
+    InvalidAdminProposal = 9,
+    /// The pending admin proposal has expired.
+    ProposalExpired = 10,
 }
 
 /// Emitted when admin ownership finishes transferring to a new address.
@@ -124,6 +131,27 @@ pub struct AdminTransferred {
     pub previous_admin: Address,
     #[topic]
     pub new_admin: Address,
+}
+
+/// Emitted when the current admin nominates a successor.
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct AdminTransferProposed {
+    #[topic]
+    pub current_admin: Address,
+    #[topic]
+    pub proposed_admin: Address,
+    pub expires_at: u64,
+}
+
+/// Emitted when a pending admin transfer is cancelled.
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct AdminTransferCancelled {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub proposed_admin: Address,
 }
 
 /// Emitted once, when the contract is initialized.
@@ -233,9 +261,25 @@ impl AttesterRegistry {
     pub fn propose_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         let current_admin = Self::admin(&env)?;
         current_admin.require_auth();
+        if new_admin == current_admin || new_admin == env.current_contract_address() {
+            return Err(Error::InvalidAdminProposal);
+        }
+        let expires_at = env
+            .ledger()
+            .timestamp()
+            .saturating_add(ADMIN_PROPOSAL_TTL_SECONDS);
         env.storage()
             .instance()
             .set(&DataKey::PendingAdmin, &new_admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdminExpiresAt, &expires_at);
+        AdminTransferProposed {
+            current_admin,
+            proposed_admin: new_admin,
+            expires_at,
+        }
+        .publish(&env);
         env.storage()
             .instance()
             .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
@@ -250,6 +294,18 @@ impl AttesterRegistry {
             .instance()
             .get(&DataKey::PendingAdmin)
             .ok_or(Error::NoPendingTransfer)?;
+        let expires_at: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdminExpiresAt)
+            .unwrap_or(0);
+        if env.ledger().timestamp() > expires_at {
+            env.storage().instance().remove(&DataKey::PendingAdmin);
+            env.storage()
+                .instance()
+                .remove(&DataKey::PendingAdminExpiresAt);
+            return Err(Error::ProposalExpired);
+        }
 
         pending_admin.require_auth();
 
@@ -257,6 +313,9 @@ impl AttesterRegistry {
             .instance()
             .set(&DataKey::Admin, &pending_admin);
         env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminExpiresAt);
 
         AdminTransferred {
             previous_admin,
@@ -268,6 +327,27 @@ impl AttesterRegistry {
             .instance()
             .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 
+        Ok(())
+    }
+
+    /// Cancel the pending admin transfer. Requires the current admin's authorization.
+    pub fn cancel_admin_proposal(env: Env) -> Result<(), Error> {
+        let admin = Self::admin(&env)?;
+        admin.require_auth();
+        let proposed_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .ok_or(Error::NoPendingTransfer)?;
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminExpiresAt);
+        AdminTransferCancelled {
+            admin,
+            proposed_admin,
+        }
+        .publish(&env);
         Ok(())
     }
 
