@@ -32,6 +32,10 @@ use std::time::Duration;
 /// failure sequences described in the ADR.
 pub mod mock;
 
+/// Resource-fee margins, inclusion-fee percentile bidding, and fee-bump
+/// decisions (issue #408). See the module doc in `fees.rs`.
+pub mod fees;
+
 /// Where a transaction currently stands, as observed via a status query
 /// (Soroban RPC `getTransaction`) rather than assumed from a submit call.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -15,6 +15,9 @@ use lafiya_config::{
 };
 use std::path::PathBuf;
 
+mod deployment_ledger;
+use deployment_ledger::{DeployEvent, DeploymentRecord};
+
 /// Env var holding the stellar CLI identity used as transaction source.
 const ENV_SOURCE: &str = "STELLAR_ACCOUNT";
 /// Env var holding the contract admin address.
@@ -70,6 +73,53 @@ enum Commands {
         #[arg(long)]
         admin: Option<String>,
     },
+    /// Append-only per-network deployment history (deployments/<network>.jsonl)
+    Deployments {
+        #[command(subcommand)]
+        sub: DeploymentsSub,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DeploymentsSub {
+    /// Append one event record to deployments/<network>.jsonl.
+    ///
+    /// Called automatically by scripts/deploy.sh and scripts/upgrade.sh after
+    /// on-chain confirmation; can also be run by hand for an out-of-band
+    /// change (e.g. admin_transfer).
+    Record {
+        /// deploy | initialize | upgrade | migrate | admin_transfer | repoint
+        #[arg(long)]
+        event: String,
+        /// attester-registry | attestation-registry | multisig-account
+        #[arg(long)]
+        contract_kind: String,
+        /// The affected contract's Stellar contract ID (C...)
+        #[arg(long)]
+        contract_id: String,
+        /// Path to the wasm now running, to compute wasm_sha256 (omit for
+        /// events that don't change code, e.g. admin_transfer)
+        #[arg(long)]
+        wasm: Option<PathBuf>,
+        /// sha256 of the wasm this event replaced (upgrade/migrate)
+        #[arg(long)]
+        previous_wasm_sha256: Option<String>,
+        /// Confirmed transaction hash. Omit only if it genuinely could not
+        /// be captured -- the record is still appended with tx_hash: null,
+        /// but `deployments verify` cannot confirm it against the chain.
+        #[arg(long)]
+        tx_hash: Option<String>,
+        /// Ledger sequence the transaction closed in, if known
+        #[arg(long)]
+        ledger: Option<u32>,
+        /// Identity/signer-set that authorized this event
+        #[arg(long)]
+        operator: String,
+    },
+    /// Verify a network's ledger file: hash chain intact, ledgers
+    /// monotonic, required fields present. Offline check only -- does not
+    /// query the chain (see deployments/README.md).
+    Verify,
 }
 
 #[derive(Subcommand, Debug)]
@@ -353,9 +403,94 @@ fn main() -> anyhow::Result<()> {
                 );
             }
         }
+        Commands::Deployments { sub } => match sub {
+            DeploymentsSub::Record {
+                event,
+                contract_kind,
+                contract_id,
+                wasm,
+                previous_wasm_sha256,
+                tx_hash,
+                ledger,
+                operator,
+            } => {
+                let event: DeployEvent = event
+                    .parse()
+                    .map_err(|e: String| anyhow::anyhow!(e))?;
+                let wasm_sha256 = wasm
+                    .as_deref()
+                    .map(wasm_sha256_hex)
+                    .transpose()
+                    .context("failed to hash --wasm")?;
+                if tx_hash.is_none() {
+                    eprintln!(
+                        "WARNING: no --tx-hash supplied; recording with tx_hash: null. \
+                         `deployments verify` cannot confirm this record against the chain."
+                    );
+                }
+                let record = DeploymentRecord {
+                    event,
+                    contract_kind,
+                    contract_id,
+                    wasm_sha256,
+                    previous_wasm_sha256,
+                    tx_hash,
+                    ledger,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    git_commit: git_commit_hash().unwrap_or_else(|_| "unknown".to_string()),
+                    release_version: env!("CARGO_PKG_VERSION").to_string(),
+                    operator,
+                    prev_record_sha256: None,
+                };
+                let dir = deployments_dir();
+                let path = deployment_ledger::append(&dir, &cli.network, record)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                println!("Appended deployment record to {}", path.display());
+            }
+            DeploymentsSub::Verify => {
+                let dir = deployments_dir();
+                let report = deployment_ledger::verify(&dir, &cli.network)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                println!(
+                    "Checked {} record(s) for network {}",
+                    report.records_checked, cli.network
+                );
+                if report.is_ok() {
+                    println!("OK: ledger is internally consistent.");
+                } else {
+                    for err in &report.errors {
+                        eprintln!("ERROR: {err}");
+                    }
+                    anyhow::bail!("{} error(s) found in deployment ledger", report.errors.len());
+                }
+            }
+        },
     }
 
     Ok(())
+}
+
+/// `<repo-root>/deployments`, found the same way `lafiya_config::default_config_path`
+/// locates `config/networks.toml`: relative to the current working directory.
+fn deployments_dir() -> PathBuf {
+    PathBuf::from("deployments")
+}
+
+fn wasm_sha256_hex(path: &std::path::Path) -> anyhow::Result<String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).with_context(|| format!("reading {path:?}"))?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn git_commit_hash() -> anyhow::Result<String> {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .context("running git rev-parse HEAD")?;
+    if !out.status.success() {
+        anyhow::bail!("git rev-parse HEAD failed");
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 mod which {

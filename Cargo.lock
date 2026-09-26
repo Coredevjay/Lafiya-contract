@@ -1282,9 +1282,13 @@ name = "lafiya-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "lafiya-config",
  "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
  "toml",
 ]
 
@@ -1307,6 +1311,10 @@ dependencies = [
  "thiserror 2.0.20",
  "toml",
 ]
+
+[[package]]
+name = "lafiya-fraud-scoring"
+version = "0.1.0"
 
 [[package]]
 name = "lafiya-rpc-resilience"
@@ -1360,6 +1368,7 @@ dependencies = [
  "attestation-registry",
  "attester-registry",
  "ed25519-dalek 3.0.0",
+ "proptest",
  "sha2 0.10.9",
  "soroban-sdk",
 ]
