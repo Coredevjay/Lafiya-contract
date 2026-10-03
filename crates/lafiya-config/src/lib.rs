@@ -2,6 +2,9 @@
 //! Used by deploy script (via Rust wrapper) and admin CLI.
 //! No secrets are ever stored in the config file — only public RPC URLs,
 //! passphrases, and contract IDs.
+#![allow(clippy::result_large_err)]
+
+pub mod record;
 
 pub mod validation;
 
@@ -15,6 +18,7 @@ pub use validation::{
 };
 
 #[derive(Debug, Error)]
+#[allow(clippy::result_large_err)]
 pub enum ConfigError {
     #[error("config/networks.toml not found at {path}")]
     NotFound(PathBuf),
