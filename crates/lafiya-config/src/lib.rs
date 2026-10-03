@@ -55,6 +55,8 @@ pub struct ContractIds {
     pub attester_registry: String,
     #[serde(default)]
     pub attestation_registry: String,
+    #[serde(default)]
+    pub incentive_pool: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -290,6 +292,7 @@ network_passphrase = "Standalone Network ; February 2017"
 [local.contracts]
 attester_registry = ""
 attestation_registry = ""
+incentive_pool = ""
 
 [testnet]
 rpc_url = "https://soroban-testnet.stellar.org"
@@ -298,6 +301,7 @@ network_passphrase = "Test SDF Network ; September 2015"
 [testnet.contracts]
 attester_registry = "CA6P..."
 attestation_registry = "CB2X..."
+incentive_pool = ""
 
 [futurenet]
 rpc_url = "https://rpc-futurenet.stellar.org"
@@ -306,6 +310,7 @@ network_passphrase = "Test SDF Future Network ; October 2022"
 [futurenet.contracts]
 attester_registry = ""
 attestation_registry = ""
+incentive_pool = ""
 
 [mainnet]
 rpc_url = "https://mainnet.sorobanrpc.com"
@@ -314,6 +319,7 @@ network_passphrase = "Public Global Stellar Network ; September 2015"
 [mainnet.contracts]
 attester_registry = ""
 attestation_registry = ""
+incentive_pool = ""
 "#
     }
 
