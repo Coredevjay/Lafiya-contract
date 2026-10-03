@@ -13,15 +13,18 @@ Building the wasm artifacts first (`make wasm`) lets the manifest include real
 sha256 hashes; without a build, wasm.sha256 is null and the manifest still
 generates (useful for CI dry-runs and for validating the tooling itself).
 """
+
 import argparse
 import hashlib
 import json
 import re
 import subprocess
-import sys
 import tomllib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+
+Json = dict[str, Any]
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,26 +38,26 @@ CONTRACTS = {
 WASM_DIR = ROOT / "target" / "wasm32v1-none" / "release"
 
 
-def run_git(*args):
+def run_git(*args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=ROOT, capture_output=True, text=True, check=True
     ).stdout.strip()
 
 
-def workspace_version():
+def workspace_version() -> str:
     with open(ROOT / "Cargo.toml", "rb") as f:
         data = tomllib.load(f)
-    return data["workspace"]["package"]["version"]
+    return str(data["workspace"]["package"]["version"])
 
 
-def storage_schema_version(crate_dir):
+def storage_schema_version(crate_dir: str) -> int | None:
     lib_rs = ROOT / crate_dir / "src" / "lib.rs"
     text = lib_rs.read_text(encoding="utf-8")
     m = re.search(r"const\s+SCHEMA_VERSION\s*:\s*u32\s*=\s*(\d+)", text)
     return int(m.group(1)) if m else None
 
 
-def wasm_info(stem):
+def wasm_info(stem: str) -> Json:
     wasm_path = WASM_DIR / f"{stem}.wasm"
     if not wasm_path.is_file():
         return {"target": "wasm32v1-none", "optimize": False, "sha256": None, "size_bytes": None}
@@ -67,8 +70,8 @@ def wasm_info(stem):
     }
 
 
-def build_contracts():
-    contracts = []
+def build_contracts() -> list[Json]:
+    contracts: list[Json] = []
     for name, (crate_dir, stem) in CONTRACTS.items():
         contracts.append(
             {
@@ -82,8 +85,8 @@ def build_contracts():
     return contracts
 
 
-def build_bindings(contracts_by_name):
-    bindings = []
+def build_bindings(contracts_by_name: dict[str, Json]) -> list[Json]:
+    bindings: list[Json] = []
     bindings_dir = ROOT / "bindings"
     if not bindings_dir.is_dir():
         return bindings
@@ -114,12 +117,13 @@ EVENT_RE = re.compile(
 FIELD_RE = re.compile(r"(#\[topic\]\s*)?pub\s+(\w+)\s*:")
 
 
-def parse_events(crate_dir, contract_name):
+def parse_events(crate_dir: str, contract_name: str) -> list[Json]:
     lib_rs = ROOT / crate_dir / "src" / "lib.rs"
     text = lib_rs.read_text(encoding="utf-8")
-    events = []
+    events: list[Json] = []
     for name, body in EVENT_RE.findall(text):
-        topic_fields, data_fields = [], []
+        topic_fields: list[str] = []
+        data_fields: list[str] = []
         for is_topic, field in FIELD_RE.findall(body):
             (topic_fields if is_topic else data_fields).append(field)
         events.append(
@@ -133,7 +137,9 @@ def parse_events(crate_dir, contract_name):
     return events
 
 
-def classify_events(events, previous_events_by_key):
+def classify_events(
+    events: list[Json], previous_events_by_key: dict[tuple[str, str], Json]
+) -> list[Json]:
     for ev in events:
         key = (ev["contract"], ev["name"])
         prev = previous_events_by_key.get(key)
@@ -153,13 +159,13 @@ def classify_events(events, previous_events_by_key):
     return events
 
 
-def build_events(previous_manifest):
-    previous_events_by_key = {}
+def build_events(previous_manifest: Json | None) -> list[Json]:
+    previous_events_by_key: dict[tuple[str, str], Json] = {}
     if previous_manifest is not None:
         previous_events_by_key = {
             (e["contract"], e["name"]): e for e in previous_manifest.get("events", [])
         }
-    events = []
+    events: list[Json] = []
     for name, (crate_dir, _stem) in CONTRACTS.items():
         events.extend(parse_events(crate_dir, name))
     classify_events(events, previous_events_by_key)
@@ -171,11 +177,11 @@ def build_events(previous_manifest):
     return events
 
 
-def build_deployments(contracts_by_name):
+def build_deployments(contracts_by_name: dict[str, Json]) -> list[Json]:
     networks_toml = ROOT / "config" / "networks.toml"
     with open(networks_toml, "rb") as f:
         networks = tomllib.load(f)
-    deployments = []
+    deployments: list[Json] = []
     for network_name, network in networks.items():
         for contract_name, contract_id in network.get("contracts", {}).items():
             # networks.toml uses snake_case keys; manifest contract names are
@@ -192,18 +198,22 @@ def build_deployments(contracts_by_name):
                     # Follow-up for the proposed append-only deployment ledger
                     # that would let this be populated automatically.
                     "wasm_sha256": None,
-                    "storage_schema_version": contract["storage_schema_version"] if contract else None,
+                    "storage_schema_version": contract["storage_schema_version"]
+                    if contract
+                    else None,
                     "deployed_at": None,
                     "upgrade_tx": None,
                     "previous_wasm_sha256": None,
                     "status": "deployed" if contract_id else "not_deployed",
-                    "source": "config/networks.toml (current pointer only, no historical ledger yet)",
+                    "source": (
+                        "config/networks.toml (current pointer only, no historical ledger yet)"
+                    ),
                 }
             )
     return deployments
 
 
-def build_compatibility():
+def build_compatibility() -> Json:
     return {
         "policy_ref": "docs/adr/0010-release-manifest-and-compatibility.md#compatibility-policy",
         "consumers": [
@@ -215,7 +225,7 @@ def build_compatibility():
     }
 
 
-def generate(previous_manifest):
+def generate(previous_manifest: Json | None) -> Json:
     contracts = build_contracts()
     contracts_by_name = {c["name"]: c for c in contracts}
     catalog = {
@@ -226,7 +236,7 @@ def generate(previous_manifest):
         for path in sorted((ROOT / "catalog").glob("*.json"))
     }
     try:
-        git_tag = run_git("describe", "--tags", "--exact-match", "HEAD")
+        git_tag: str | None = run_git("describe", "--tags", "--exact-match", "HEAD")
     except subprocess.CalledProcessError:
         git_tag = None
     return {
@@ -235,7 +245,7 @@ def generate(previous_manifest):
             "workspace_version": workspace_version(),
             "git_commit": run_git("rev-parse", "HEAD"),
             "git_tag": git_tag,
-            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         },
         "contracts": contracts,
         "bindings": build_bindings(contracts_by_name),
@@ -246,7 +256,7 @@ def generate(previous_manifest):
     }
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--previous", type=Path, help="prior release manifest, used to classify event compatibility"

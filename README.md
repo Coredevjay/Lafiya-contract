@@ -121,6 +121,7 @@ Four Soroban contracts, each in its own crate under `contracts/`.
 | `unpause()` | Restores normal operation after `pause`. Requires admin auth. Emits `Unpaused`. |
 | `is_paused() -> bool` | Whether the contract is currently paused. Callable while paused. |
 | `get_schema_version() -> u32` | Storage schema version recorded for the instance. Open to any caller. |
+| `get_interface() -> InterfaceInfo` | Contract kind, interface version, enabled features, and storage/event schema versions for runtime compatibility negotiation (see [docs/releasing.md](docs/releasing.md#interface-version-and-runtime-negotiation)). Open to any caller. |
 | `upgrade(new_wasm_hash: BytesN<32>)` | Replaces the contract's code with the already-uploaded wasm blob at `new_wasm_hash`. Requires admin auth; storage is untouched. See [Contract upgrades](#contract-upgrades). |
 | `migrate()` | Runs any pending storage-schema migration, then records the new schema version. Requires admin auth; errors with `MigrationNotRequired` when nothing is pending. |
 
@@ -141,6 +142,7 @@ Four Soroban contracts, each in its own crate under `contracts/`.
 | `revoke_attestation(record_hash: BytesN<32>)` | Revokes all attestations for `record_hash`. Requires admin auth. Emits `AttestationRevoked`. |
 | `get_attestation(record_hash: BytesN<32>) -> Option<Attestation>` | Looks up the latest attestation for a record hash. Open to any caller — this is what lets a responder's QR scan verify a card without an external oracle. |
 | `get_attestation_history(record_hash: BytesN<32>) -> Vec<Attestation>` | Returns the full bounded attestation history for a record hash, oldest first. Open to any caller. |
+| `get_interface() -> InterfaceInfo` | Contract kind, interface version, enabled features, and storage/event schema versions for runtime compatibility negotiation (see [docs/releasing.md](docs/releasing.md#interface-version-and-runtime-negotiation)). Open to any caller. |
 
 ### Contract upgrades
 
@@ -159,6 +161,7 @@ mechanical steps are automated by [`scripts/upgrade.sh`](scripts/upgrade.sh).
 | --- | --- |
 | `__constructor(signers: Vec<BytesN<32>>, threshold: u32)` | Configures the ed25519 signer set and required N-of-M threshold at deployment. |
 | `__check_auth(...)` | Verifies ordered, unique signatures from configured signers whenever another contract calls `require_auth()` for this account address. |
+| `get_interface() -> InterfaceInfo` | Contract kind, interface version, enabled features, and storage/event schema versions for runtime compatibility negotiation (see [docs/releasing.md](docs/releasing.md#interface-version-and-runtime-negotiation)). Open to any caller. |
 
 `attestation-registry` calls `attester-registry` through a local `#[contractclient]` trait interface (just `is_attester`), not a direct crate dependency — depending on the whole crate would link `attester-registry`'s own contract implementation into `attestation-registry`'s wasm build too, which is both wasted size and, at least on the Soroban SDK version this repo pins, produces a linker warning from the two contracts' colliding `initialize` exports.
 

@@ -22,11 +22,11 @@
       "inputs": [
         {
           "name": "attester",
-          "type_": "address"
+          "type": "address"
         },
         {
           "name": "record_hash",
-          "type_": {
+          "type": {
             "bytes_n": {
               "n": 32
             }
@@ -71,7 +71,7 @@
       "inputs": [
         {
           "name": "record_hash",
-          "type_": {
+          "type": {
             "bytes_n": {
               "n": 32
             }
@@ -99,7 +99,7 @@
       "inputs": [
         {
           "name": "record_hash",
-          "type_": {
+          "type": {
             "bytes_n": {
               "n": 32
             }
@@ -138,16 +138,31 @@
   },
   {
     "kind": "function_v0",
+    "name": "get_interface",
+    "spec": {
+      "inputs": [],
+      "name": "get_interface",
+      "outputs": [
+        {
+          "udt": {
+            "name": "InterfaceInfo"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "kind": "function_v0",
     "name": "initialize",
     "spec": {
       "inputs": [
         {
           "name": "admin",
-          "type_": "address"
+          "type": "address"
         },
         {
           "name": "attester_registry",
-          "type_": "address"
+          "type": "address"
         }
       ],
       "name": "initialize",
@@ -195,7 +210,7 @@
       "inputs": [
         {
           "name": "new_admin",
-          "type_": "address"
+          "type": "address"
         }
       ],
       "name": "propose_admin",
@@ -216,7 +231,7 @@
       "inputs": [
         {
           "name": "record_hash",
-          "type_": {
+          "type": {
             "bytes_n": {
               "n": 32
             }
@@ -241,7 +256,7 @@
       "inputs": [
         {
           "name": "new_registry",
-          "type_": "address"
+          "type": "address"
         }
       ],
       "name": "set_attester_registry",
@@ -320,12 +335,12 @@
         {
           "location": "topic_list",
           "name": "previous_admin",
-          "type_": "address"
+          "type": "address"
         },
         {
           "location": "topic_list",
           "name": "new_admin",
-          "type_": "address"
+          "type": "address"
         }
       ],
       "prefix_topics": [
@@ -344,7 +359,7 @@
         {
           "location": "topic_list",
           "name": "record_hash",
-          "type_": {
+          "type": {
             "bytes_n": {
               "n": 32
             }
@@ -353,12 +368,12 @@
         {
           "location": "data",
           "name": "attester",
-          "type_": "address"
+          "type": "address"
         },
         {
           "location": "data",
           "name": "timestamp",
-          "type_": "u64"
+          "type": "u64"
         }
       ],
       "prefix_topics": [
@@ -377,7 +392,7 @@
         {
           "location": "topic_list",
           "name": "record_hash",
-          "type_": {
+          "type": {
             "bytes_n": {
               "n": 32
             }
@@ -400,12 +415,12 @@
         {
           "location": "topic_list",
           "name": "previous",
-          "type_": "address"
+          "type": "address"
         },
         {
           "location": "topic_list",
           "name": "new",
-          "type_": "address"
+          "type": "address"
         }
       ],
       "prefix_topics": [
@@ -424,7 +439,7 @@
         {
           "location": "topic_list",
           "name": "by",
-          "type_": "address"
+          "type": "address"
         }
       ],
       "prefix_topics": [
@@ -443,7 +458,7 @@
         {
           "location": "topic_list",
           "name": "by",
-          "type_": "address"
+          "type": "address"
         }
       ],
       "prefix_topics": [
@@ -458,15 +473,49 @@
       "fields": [
         {
           "name": "attester",
-          "type_": "address"
+          "type": "address"
         },
         {
           "name": "timestamp",
-          "type_": "u64"
+          "type": "u64"
         }
       ],
       "lib": "",
       "name": "Attestation"
+    }
+  },
+  {
+    "kind": "udt_struct_v0",
+    "name": "InterfaceInfo",
+    "spec": {
+      "fields": [
+        {
+          "name": "contract_kind",
+          "type": "symbol"
+        },
+        {
+          "name": "event_version",
+          "type": "u32"
+        },
+        {
+          "name": "features",
+          "type": {
+            "vec": {
+              "element_type": "symbol"
+            }
+          }
+        },
+        {
+          "name": "interface_version",
+          "type": "u32"
+        },
+        {
+          "name": "schema_version",
+          "type": "u32"
+        }
+      ],
+      "lib": "",
+      "name": "InterfaceInfo"
     }
   }
 ]

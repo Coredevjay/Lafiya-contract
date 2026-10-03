@@ -21,6 +21,8 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
+mod interface;
+
 /// Env var holding the stellar CLI identity used as transaction source.
 const ENV_SOURCE: &str = "STELLAR_ACCOUNT";
 /// Env var holding the contract admin address.
@@ -79,6 +81,12 @@ enum Commands {
         #[command(subcommand)]
         sub: AuditSub,
     },
+    /// Negotiate the interface of a deployed contract via `get_interface`
+    Interface {
+        /// Which contract to query
+        #[arg(value_enum)]
+        contract: InterfaceTarget,
+    },
     /// Deploy contracts (wrapper around scripts/deploy.sh logic, but uses same config)
     Deploy {
         /// Build only, don't deploy
@@ -94,6 +102,12 @@ enum Commands {
         #[arg(long)]
         admin: Option<String>,
     },
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum InterfaceTarget {
+    Attester,
+    Attestation,
 }
 
 #[derive(Subcommand, Debug)]
@@ -468,6 +482,39 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         },
+        Commands::Interface { contract } => {
+            let (kind, req) = match contract {
+                InterfaceTarget::Attester => {
+                    (ContractKind::AttesterRegistry, interface::ATTESTER_REGISTRY)
+                }
+                InterfaceTarget::Attestation => (
+                    ContractKind::AttestationRegistry,
+                    interface::ATTESTATION_REGISTRY,
+                ),
+            };
+            let contract_id = network_cfg
+                .require_contract_id(&cli.network, kind)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            if which::which("stellar").is_err() {
+                anyhow::bail!(
+                    "stellar CLI not found - install with cargo install --locked stellar-cli"
+                );
+            }
+            let args = invoke_args(&network_cfg, contract_id, None, "get_interface", &[]);
+            let output = std::process::Command::new("stellar").args(args).output()?;
+            let raw = output
+                .status
+                .success()
+                .then(|| String::from_utf8_lossy(&output.stdout).into_owned());
+            let info = interface::negotiate(contract_id, raw.as_deref(), req)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            println!("Contract: {contract_id}");
+            println!("Kind: {}", info.contract_kind);
+            println!("Interface version: {}", info.interface_version);
+            println!("Schema version: {}", info.schema_version);
+            println!("Event version: {}", info.event_version);
+            println!("Features: {}", info.features.join(", "));
+        }
         Commands::Deploy {
             build_only,
             dry_run,

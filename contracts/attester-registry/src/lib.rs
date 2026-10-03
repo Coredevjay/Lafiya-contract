@@ -11,6 +11,45 @@ use soroban_sdk::{
 const SCHEMA_VERSION: u32 = 1;
 const ADMIN_PROPOSAL_TTL_SECONDS: u64 = 30 * 24 * 60 * 60;
 
+/// Interface kind reported by `get_interface`, used by clients as a weak
+/// identity check when wiring contracts (not proof of authenticity).
+pub const CONTRACT_KIND: &str = "lafiya_attester_registry";
+
+/// Version of the public contract interface (functions, errors, types).
+/// Bump on any breaking ABI change; `scripts/conformance/check_snapshot.py`
+/// refuses a breaking snapshot update without a bump.
+pub const INTERFACE_VERSION: u32 = 1;
+
+/// Version of the emitted event schemas (see `docs/events.md`).
+pub const EVENT_VERSION: u32 = 1;
+
+/// Optional features this build supports, reported by `get_interface`.
+pub const FEATURES: [&str; 6] = [
+    "pause",
+    "metadata",
+    "suspension",
+    "batch",
+    "max_attesters",
+    "migrate",
+];
+
+/// Interface and capability metadata returned by `get_interface`, so
+/// clients can negotiate features with one call instead of probing.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InterfaceInfo {
+    /// Contract kind, e.g. `lafiya_attester_registry`.
+    pub contract_kind: Symbol,
+    /// Public interface version; bumped on any breaking ABI change.
+    pub interface_version: u32,
+    /// Optional features enabled in this build.
+    pub features: Vec<Symbol>,
+    /// Storage schema version (see `get_schema_version`).
+    pub schema_version: u32,
+    /// Event schema version.
+    pub event_version: u32,
+}
+
 /// Storage keys for the attester registry.
 ///
 /// UPGRADE SAFETY: `#[contracttype]` enums serialize variants by their
@@ -880,6 +919,23 @@ impl AttesterRegistry {
             .persistent()
             .has(&DataKey::Suspended(attester));
         Some(AttesterStatus { info, suspended })
+    }
+
+    /// Report the contract kind, interface version, enabled features, and
+    /// storage/event schema versions for runtime compatibility negotiation.
+    /// Callable by anyone.
+    pub fn get_interface(env: Env) -> InterfaceInfo {
+        let mut features = Vec::new(&env);
+        for feature in FEATURES {
+            features.push_back(Symbol::new(&env, feature));
+        }
+        InterfaceInfo {
+            contract_kind: Symbol::new(&env, CONTRACT_KIND),
+            interface_version: INTERFACE_VERSION,
+            features,
+            schema_version: Self::get_schema_version(env.clone()),
+            event_version: EVENT_VERSION,
+        }
     }
 
     /// Query the current storage schema version of the contract.
