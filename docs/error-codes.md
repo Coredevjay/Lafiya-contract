@@ -5,6 +5,8 @@ This document enumerates the error codes defined in the Lafiya Soroban smart con
 > [!IMPORTANT]
 > **Error codes are contract-scoped, not global.** Each contract defines its own `Error` enum starting from `1`. To correctly interpret an error code, you must know which contract produced the error.
 
+For programmatic decoding, use the generated [`catalog/errors.json`](../catalog/errors.json) or `decodeContractError(contractKind, code)` from the bindings' `catalog` export instead of hard-coding this table.
+
 ## `attester-registry`
 
 | Error Code (u32) | Variant Name | Description |

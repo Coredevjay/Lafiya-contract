@@ -108,3 +108,16 @@ The M2 design for paying *CHWs*: grant and donor funds flow on-chain into a pool
 CHWs receive USDC micro-payments per verified registration. The treasury and custody model
 is defined by [ADR-0009](adr/0009-treasury-asset-custody-model.md). No payout contract is
 implemented yet.
+
+### Verdict
+
+The single result a verifier returns for a card, drawn from the finite set defined by the
+*verification model* (`Verified`, `Revoked`, `Expired`, `Indeterminate`, and so on). Only
+`Verified` is a positive result.
+
+### Verification model
+
+The normative definition of how a verifier turns a card, chain state, policy, and time into
+a *verdict*, including precedence and degraded-mode rules. Defined in
+[`docs/specs/verification-model.md`](specs/verification-model.md), with a machine-readable
+truth table every implementation runs in CI.

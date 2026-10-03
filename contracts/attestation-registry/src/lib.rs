@@ -132,8 +132,10 @@ pub struct AttesterRegistryRepointed {
 #[repr(u32)]
 pub enum Error {
     /// `initialize` has not been called yet.
+    /// @severity operator
     NotInitialized = 1,
     /// `initialize` was called more than once.
+    /// @severity operator
     AlreadyInitialized = 2,
     /// The caller is not allowlisted by the `attester-registry` contract.
     AttesterNotAllowlisted = 3,
@@ -144,6 +146,7 @@ pub enum Error {
     /// corresponding `propose_admin` call has set a pending admin.
     NoPendingTransfer = 4,
     /// The configured `attester-registry` address does not implement the expected interface. Re-run `set_attester_registry` with the correct address, or check your network configuration.
+    /// @severity operator
     InvalidRegistryWiring = 5,
     /// No attestation exists for the given record hash / sequence.
     AttestationNotFound = 6,
