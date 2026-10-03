@@ -208,6 +208,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Check README contract tables
         run: python .github/scripts/check_readme_contracts.py
+      - name: Check README versions match Cargo.toml
+        run: python .github/scripts/check_readme_versions.py
       - name: Check error/event catalogs are regenerated
         run: python3 scripts/conformance/gen_catalog.py --check
       - name: Run the verification-model truth table

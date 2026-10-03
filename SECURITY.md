@@ -46,6 +46,11 @@ Include, where possible:
   public detail is published, and we credit reporters (unless you'd
   rather stay anonymous).
 
+## Threat model
+
+The contract-layer STRIDE threat model, with attack trees mapped to
+mitigations, is in [`docs/security/threat-model.md`](docs/security/threat-model.md).
+
 ## Bug bounty program
 
 Lafiya runs a bug bounty program for the contracts and the verification

@@ -84,6 +84,11 @@ pub struct InterfaceInfo {
 const INSTANCE_BUMP_AMOUNT: u32 = 1_555_200;
 const INSTANCE_LIFETIME_THRESHOLD: u32 = 518_400;
 
+/// Upper bound on a rate-limit window (30 days of ledgers). Keeps the
+/// temporary `RateWindow` entry's TTL well inside the network's maximum
+/// entry TTL.
+const MAX_RATE_WINDOW_LEDGERS: u32 = 518_400;
+
 /// Storage keys for the attestation registry.
 ///
 /// UPGRADE SAFETY: `#[contracttype]` enums serialize variants by their
@@ -112,6 +117,33 @@ enum DataKey {
     Paused,
     /// Ledger timestamp at which the pending admin proposal expires.
     PendingAdminExpiresAt,
+    /// The global per-attester `RateLimit` (instance storage). Absent means
+    /// attestations are not rate limited.
+    RateLimit,
+    /// Per-attester override of `RateLimit.max_per_window` (persistent storage).
+    RateLimitOverride(Address),
+    /// The attester's current `RateWindow` (temporary storage; expires with
+    /// the window).
+    RateWindow(Address),
+}
+
+/// Admin-configured per-attester attestation rate limit: at most
+/// `max_per_window` attestations per attester in any window of
+/// `window_ledgers` ledgers.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RateLimit {
+    pub max_per_window: u32,
+    pub window_ledgers: u32,
+}
+
+/// An attester's fixed rate-limit window: the ledger it started at and the
+/// number of attestations recorded in it so far.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RateWindow {
+    pub window_start_ledger: u32,
+    pub count: u32,
 }
 
 /// A single attestation: proof that `attester` verified the off-chain
@@ -154,6 +186,28 @@ pub struct AttestationRecorded {
 pub struct AttestationRevoked {
     #[topic]
     pub record_hash: BytesN<32>,
+}
+
+/// Emitted when an attester records the last attestation its rate-limit
+/// window allows. Published at most once per attester per window, so it
+/// cannot itself be used to spam; further attempts in the window fail with
+/// `Error::RateLimited` and, as failed invocations, publish no events.
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct RateLimitHit {
+    #[topic]
+    pub attester: Address,
+    /// First ledger at which the attester may attest again.
+    pub retry_after_ledger: u32,
+}
+
+/// Emitted when the admin changes the global attestation rate limit.
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct RateLimitSet {
+    /// Maximum attestations per attester per window; `0` disables limiting.
+    pub max_per_window: u32,
+    pub window_ledgers: u32,
 }
 
 /// Emitted when state-changing operations are paused.
@@ -212,6 +266,11 @@ pub enum Error {
     InvalidAdminProposal = 8,
     /// The pending admin proposal has expired.
     ProposalExpired = 9,
+    /// The attester has used up its rate-limit window. Call
+    /// `get_rate_limit_retry_after` for the first ledger it may attest again.
+    RateLimited = 10,
+    /// `window_ledgers` was `0` or longer than 30 days of ledgers.
+    InvalidRateLimit = 11,
 }
 
 /// The attestation registry contract.
@@ -428,6 +487,8 @@ impl AttestationRegistry {
             return Err(Error::AttesterNotAllowlisted);
         }
 
+        Self::consume_rate_limit(&env, &attester)?;
+
         let attestation = Attestation {
             attester: attester.clone(),
             timestamp: env.ledger().timestamp(),
@@ -601,6 +662,158 @@ impl AttestationRegistry {
         }
 
         history
+    }
+
+    /// Set the global per-attester attestation rate limit: at most
+    /// `max_per_window` attestations per attester per `window_ledgers`
+    /// ledgers. `max_per_window == 0` disables rate limiting. Requires the
+    /// admin's authorization.
+    pub fn set_attestation_rate_limit(
+        env: Env,
+        max_per_window: u32,
+        window_ledgers: u32,
+    ) -> Result<(), Error> {
+        let admin = Self::admin(&env)?;
+        admin.require_auth();
+        if max_per_window == 0 {
+            env.storage().instance().remove(&DataKey::RateLimit);
+        } else {
+            if window_ledgers == 0 || window_ledgers > MAX_RATE_WINDOW_LEDGERS {
+                return Err(Error::InvalidRateLimit);
+            }
+            env.storage().instance().set(
+                &DataKey::RateLimit,
+                &RateLimit {
+                    max_per_window,
+                    window_ledgers,
+                },
+            );
+        }
+        RateLimitSet {
+            max_per_window,
+            window_ledgers,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Return the global attestation rate limit, if one is configured.
+    pub fn get_attestation_rate_limit(env: Env) -> Option<RateLimit> {
+        env.storage().instance().get(&DataKey::RateLimit)
+    }
+
+    /// Override `max_per_window` for a single attester (e.g. a high-volume
+    /// clinical site). The global window length still applies. Requires the
+    /// admin's authorization.
+    pub fn set_attester_rate_limit(
+        env: Env,
+        attester: Address,
+        max_per_window: u32,
+    ) -> Result<(), Error> {
+        let admin = Self::admin(&env)?;
+        admin.require_auth();
+        let key = DataKey::RateLimitOverride(attester);
+        env.storage().persistent().set(&key, &max_per_window);
+        env.storage().persistent().extend_ttl(
+            &key,
+            INSTANCE_LIFETIME_THRESHOLD,
+            INSTANCE_BUMP_AMOUNT,
+        );
+        Ok(())
+    }
+
+    /// Remove an attester's rate-limit override, reverting it to the global
+    /// limit. Requires the admin's authorization.
+    pub fn remove_attester_rate_limit(env: Env, attester: Address) -> Result<(), Error> {
+        let admin = Self::admin(&env)?;
+        admin.require_auth();
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RateLimitOverride(attester));
+        Ok(())
+    }
+
+    /// If `attester` has used up its current rate-limit window, return the
+    /// first ledger at which it may attest again; otherwise `None`.
+    pub fn get_rate_limit_retry_after(env: Env, attester: Address) -> Option<u32> {
+        let limit: RateLimit = env.storage().instance().get(&DataKey::RateLimit)?;
+        let max = Self::max_per_window(&env, &attester, &limit);
+        let window = Self::current_window(&env, &attester, &limit)?;
+        if window.count >= max {
+            Some(
+                window
+                    .window_start_ledger
+                    .saturating_add(limit.window_ledgers),
+            )
+        } else {
+            None
+        }
+    }
+
+    fn max_per_window(env: &Env, attester: &Address, limit: &RateLimit) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::RateLimitOverride(attester.clone()))
+            .unwrap_or(limit.max_per_window)
+    }
+
+    /// The attester's still-open window, or `None` if it has rolled over or
+    /// its temporary entry has expired.
+    fn current_window(env: &Env, attester: &Address, limit: &RateLimit) -> Option<RateWindow> {
+        let window: RateWindow = env
+            .storage()
+            .temporary()
+            .get(&DataKey::RateWindow(attester.clone()))?;
+        let now = env.ledger().sequence();
+        if now
+            >= window
+                .window_start_ledger
+                .saturating_add(limit.window_ledgers)
+        {
+            None
+        } else {
+            Some(window)
+        }
+    }
+
+    /// Count one attestation against `attester`'s window, or fail with
+    /// `RateLimited` if the window is full. The window lives in temporary
+    /// storage; if the entry is archived early the attester simply starts a
+    /// fresh window (fails open), which is acceptable for rate limiting.
+    fn consume_rate_limit(env: &Env, attester: &Address) -> Result<(), Error> {
+        let limit: RateLimit = match env.storage().instance().get(&DataKey::RateLimit) {
+            Some(limit) => limit,
+            None => return Ok(()),
+        };
+        let max = Self::max_per_window(env, attester, &limit);
+        let now = env.ledger().sequence();
+        let mut window = Self::current_window(env, attester, &limit).unwrap_or(RateWindow {
+            window_start_ledger: now,
+            count: 0,
+        });
+        if window.count >= max {
+            return Err(Error::RateLimited);
+        }
+        window.count += 1;
+
+        let window_end = window
+            .window_start_ledger
+            .saturating_add(limit.window_ledgers);
+        let key = DataKey::RateWindow(attester.clone());
+        env.storage().temporary().set(&key, &window);
+        let remaining = window_end - now;
+        env.storage()
+            .temporary()
+            .extend_ttl(&key, remaining, remaining);
+
+        if window.count == max {
+            RateLimitHit {
+                attester: attester.clone(),
+                retry_after_ledger: window_end,
+            }
+            .publish(env);
+        }
+        Ok(())
     }
 
     fn admin(env: &Env) -> Result<Address, Error> {

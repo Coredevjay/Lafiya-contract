@@ -152,4 +152,5 @@ There is no `rustfmt.toml` in this repo — that's intentional, not an oversight
 1. Fork the repository and create your branch from `main`.
 2. Ensure your changes compile and pass all quality checks locally (`make check`).
 3. Fill out the [Pull Request Template](.github/pull_request_template.md) completely, paying extra attention to the **Cross-Repo Impact** section if your changes touch shared interfaces.
+   If your change alters a public surface (contract functions, storage, events, error codes, bindings, CLI, or the commitment scheme), follow the [Interface Stability and Deprecation Policy](docs/stability-policy.md) and answer **Breaking change?** in the template.
 4. An admin will review your PR. All checks in CI must pass before merging.

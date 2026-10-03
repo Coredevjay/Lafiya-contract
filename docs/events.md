@@ -63,6 +63,26 @@ for how these events are consumed.
 |---|---|---|
 | `by` | `Address` | topic_list |
 
+### `RateLimitHit`
+
+- **Prefix topics:** `rate_limit_hit`
+- **Data format:** `map`
+
+| Field | Type | Location |
+|---|---|---|
+| `attester` | `Address` | topic_list |
+| `retry_after_ledger` | `u32` | data |
+
+### `RateLimitSet`
+
+- **Prefix topics:** `rate_limit_set`
+- **Data format:** `map`
+
+| Field | Type | Location |
+|---|---|---|
+| `max_per_window` | `u32` | data |
+| `window_ledgers` | `u32` | data |
+
 ### `Unpaused`
 
 - **Prefix topics:** `unpaused`

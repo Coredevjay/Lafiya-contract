@@ -143,6 +143,11 @@ Four Soroban contracts, each in its own crate under `contracts/`.
 | `get_attestation(record_hash: BytesN<32>) -> Option<Attestation>` | Looks up the latest attestation for a record hash. Open to any caller — this is what lets a responder's QR scan verify a card without an external oracle. |
 | `get_attestation_history(record_hash: BytesN<32>) -> Vec<Attestation>` | Returns the full bounded attestation history for a record hash, oldest first. Open to any caller. |
 | `get_interface() -> InterfaceInfo` | Contract kind, interface version, enabled features, and storage/event schema versions for runtime compatibility negotiation (see [docs/releasing.md](docs/releasing.md#interface-version-and-runtime-negotiation)). Open to any caller. |
+| `set_attestation_rate_limit(max_per_window: u32, window_ledgers: u32)` | Caps each attester at `max_per_window` attestations per `window_ledgers` ledgers (`0` disables; off by default). Over-limit `attest` calls fail with `Error::RateLimited`. Requires admin auth. Emits `RateLimitSet`. See [`docs/storage-cost.md`](docs/storage-cost.md#attestation-rate-limiting). |
+| `get_attestation_rate_limit() -> Option<RateLimit>` | Returns the global rate limit, if one is configured. |
+| `set_attester_rate_limit(attester: Address, max_per_window: u32)` | Overrides `max_per_window` for one attester (e.g. a high-volume clinical site). Requires admin auth. |
+| `remove_attester_rate_limit(attester: Address)` | Removes an attester's override, reverting it to the global limit. Requires admin auth. |
+| `get_rate_limit_retry_after(attester: Address) -> Option<u32>` | If the attester's window is full, returns the first ledger it may attest again. |
 
 ### Contract upgrades
 
@@ -269,7 +274,7 @@ strategy and the follow-up work required before that's live.
 
 ## Tech Stack
 
-- **On-chain:** Soroban smart contracts (Rust), `soroban-sdk` 25.x, on Stellar; USDC on Stellar for CHW payments via `incentive-pool` contract
+- **On-chain:** Soroban smart contracts (Rust), `soroban-sdk` 28.x, on Stellar; USDC on Stellar for CHW payments via `incentive-pool` contract
 - **Network:** Stellar testnet first
 - **Standards informing design:** W3C Verifiable Credentials data model (issuer/holder/verifier roles, hash-based attestation)
 
@@ -364,7 +369,7 @@ Covers, per contract (see `contracts/*/src/test.rs` and `tests/integration/run.s
 ## Dependencies
 
 - Rust (stable) + `wasm32v1-none` target — see `rust-toolchain.toml`
-- `soroban-sdk` 25.x
+- `soroban-sdk` 28.x
 - Stellar testnet account and USDC trustline, once deployment scripts land
 
 ## License
@@ -376,6 +381,7 @@ Covers, per contract (see `contracts/*/src/test.rs` and `tests/integration/run.s
 Contributions are welcome! As an open-source Digital Public Good, we rely on community contributions to build and maintain Lafiya.
 
 Please refer to [CONTRIBUTING.md](CONTRIBUTING.md) for our detailed guidelines, which cover:
+- The [interface stability and deprecation policy](docs/stability-policy.md) for public contract, event, bindings, and CLI surfaces
 - Local development environment setup
 - Branching and commit conventions (Conventional Commits)
 - Cross-repo shared-contract coordination guidelines
@@ -452,7 +458,7 @@ Lafiya is an information aid, **not a medical device** and **not a substitute fo
 
 ## Security
 
-Found a vulnerability? Please don't open a public issue — see [SECURITY.md](SECURITY.md) for how to report it privately.
+Found a vulnerability? Please don't open a public issue — see [SECURITY.md](SECURITY.md) for how to report it privately. The contract-layer threat model is in [docs/security/threat-model.md](docs/security/threat-model.md).
 
 ## References
 
