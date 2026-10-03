@@ -206,7 +206,9 @@ impl RecoveryLog {
 
     /// Append one line to the log.
     pub fn record(&mut self, line: impl Into<String>) {
-        self.0.push(line.into());
+        let line = line.into();
+        tracing::debug!(recovery = %line);
+        self.0.push(line);
     }
 
     /// The recorded lines, in the order they were added.
@@ -227,15 +229,11 @@ pub enum RecoveryResult {
     /// A ledger closed with the transaction included but it failed on-chain.
     /// Its sequence number is consumed either way, so it must not be
     /// resubmitted.
-    RejectedOnChain {
-        reason: String,
-    },
+    RejectedOnChain { reason: String },
     /// Every retry/poll budget was spent without a final verdict. This is
     /// the escalate-to-operator case; `last_known` is what to hand the
     /// runbook.
-    ExhaustedNeedsOperator {
-        last_known: TxState,
-    },
+    ExhaustedNeedsOperator { last_known: TxState },
 }
 
 /// Round-robins submission across an ordered list of providers and, on any
@@ -274,7 +272,16 @@ impl FailoverClient {
                     "round {submit_round}: submit {tx_hash} via {}",
                     provider.name()
                 ));
-                provider.submit(tx_hash)
+                let started = std::time::Instant::now();
+                let outcome = provider.submit(tx_hash);
+                tracing::info!(
+                    provider = provider.name(),
+                    latency_ms = started.elapsed().as_millis() as u64,
+                    classified = ?classify(&outcome),
+                    round = submit_round,
+                    "rpc submit"
+                );
+                outcome
             };
 
             match outcome {
@@ -340,7 +347,16 @@ impl FailoverClient {
 
             for i in 0..provider_count {
                 let provider = &mut self.providers[i];
-                match provider.get_transaction(tx_hash) {
+                let started = std::time::Instant::now();
+                let polled = provider.get_transaction(tx_hash);
+                tracing::info!(
+                    provider = provider.name(),
+                    latency_ms = started.elapsed().as_millis() as u64,
+                    outcome = ?polled,
+                    poll_round,
+                    "rpc get_transaction"
+                );
+                match polled {
                     Ok(TxState::Accepted { ledger }) => {
                         let name = provider.name().to_string();
                         log.record(format!(

@@ -109,6 +109,12 @@ extending this to a list; until that lands, do this manually):
 
 ## 5. Escalate
 
+The security watchdog raises `watchdog_failing` / `watchdog_lag` (critical) when it
+cannot reach RPC or falls behind; during an outage expect those alerts and follow
+[watchdog.md](watchdog.md#alert-types). Every admin command run with `lafiya-cli`
+during the incident is recorded in `~/.lafiya/audit.jsonl` (`lafiya-cli audit show`),
+including the transaction hash when the stellar CLI reported one.
+
 If §3a's poll budget is exhausted and no provider will confirm either `SUCCESS`, `FAILED`,
 or a consistent `NOT_FOUND`, stop retrying. Record: the transaction hash, the command that
 was run, the network, and every provider URL queried with its response. This is exactly the

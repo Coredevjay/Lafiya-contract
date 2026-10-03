@@ -7,12 +7,18 @@
 //! hash, admin/source account) is validated locally before the stellar CLI is
 //! invoked, so malformed input fails fast with an actionable message.
 
+mod audit;
+mod auth_decode;
+mod logging;
+
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use lafiya_config::{
     get_network, load_networks, validate_account_address, validate_address, validate_network_name,
     validate_record_hash, validate_source_account, ContractKind, DeploymentState, NetworkConfig,
 };
+use std::collections::BTreeMap;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 /// Env var holding the stellar CLI identity used as transaction source.
@@ -34,6 +40,14 @@ struct Cli {
     #[arg(long, global = true)]
     config: Option<PathBuf>,
 
+    /// Log output format (logs go to stderr)
+    #[arg(long, value_enum, default_value = "text", global = true)]
+    log_format: logging::LogFormat,
+
+    /// Increase log verbosity (-v debug, -vv trace)
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    verbose: u8,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -54,6 +68,16 @@ enum Commands {
     Attestation {
         #[command(subcommand)]
         sub: AttestationSub,
+    },
+    /// Decode authorization entries for signer review (ADR-0007)
+    Auth {
+        #[command(subcommand)]
+        sub: AuthSub,
+    },
+    /// Inspect the local operation audit log
+    Audit {
+        #[command(subcommand)]
+        sub: AuditSub,
     },
     /// Deploy contracts (wrapper around scripts/deploy.sh logic, but uses same config)
     Deploy {
@@ -106,6 +130,39 @@ enum AttesterSub {
 }
 
 #[derive(Subcommand, Debug)]
+enum AuthSub {
+    /// Render a SorobanAuthorizationEntry or TransactionEnvelope (base64 XDR,
+    /// or a path to a file containing it) as a human-readable tree
+    Decode {
+        /// Base64 XDR, or a path to a file containing it
+        input: String,
+        /// Output format
+        #[arg(long, value_enum, default_value = "text")]
+        format: DecodeFormat,
+        /// Extra known address label, as ADDRESS=NAME (repeatable)
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        /// Current ledger sequence, to show how soon the entry expires
+        #[arg(long)]
+        current_ledger: Option<u32>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum DecodeFormat {
+    Text,
+    Json,
+}
+
+#[derive(Subcommand, Debug)]
+enum AuditSub {
+    /// Print the audit log (LAFIYA_AUDIT_LOG or ~/.lafiya/audit.jsonl)
+    Show,
+    /// Verify the audit log hash chain
+    Verify,
+}
+
+#[derive(Subcommand, Debug)]
 enum AttestationSub {
     /// Get attestation for a record hash (hex encoded 32-byte hash)
     Get {
@@ -126,6 +183,12 @@ enum AttestationSub {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let _log_guard = logging::init(cli.log_format, cli.verbose);
+
+    // The audit log is local and needs no network config.
+    if let Commands::Audit { sub } = &cli.command {
+        return run_audit(sub);
+    }
 
     // Validate the network name before it is used as a config key.
     validate_network_name(&cli.network)
@@ -175,6 +238,33 @@ fn main() -> anyhow::Result<()> {
     }
 
     match cli.command {
+        Commands::Audit { .. } => {} // handled above
+        Commands::Auth {
+            sub:
+                AuthSub::Decode {
+                    input,
+                    format,
+                    labels,
+                    current_ledger,
+                },
+        } => {
+            let _span = tracing::info_span!("auth.decode", network = %cli.network).entered();
+            let raw = match std::fs::read_to_string(&input) {
+                Ok(contents) => contents,
+                Err(_) => input,
+            };
+            let ctx = auth_decode::DecodeContext {
+                network_name: cli.network.clone(),
+                network_passphrase: network_cfg.network_passphrase.clone(),
+                labels: known_labels(&network_cfg, &labels)?,
+                current_ledger,
+            };
+            let entries = auth_decode::decode_input(&raw, &ctx)?;
+            match format {
+                DecodeFormat::Text => print!("{}", auth_decode::render_text(&entries, &ctx)),
+                DecodeFormat::Json => println!("{}", serde_json::to_string_pretty(&entries)?),
+            }
+        }
         Commands::Config { sub } => {
             match sub {
                 ConfigSub::Show => {
@@ -271,7 +361,15 @@ fn main() -> anyhow::Result<()> {
                     "add_attester",
                     &["--attester", &address],
                 );
-                run_stellar(args)?;
+                run_audited(
+                    "attester add",
+                    &cli.network,
+                    contract_id,
+                    "add_attester",
+                    &[&address],
+                    source.as_deref(),
+                    args,
+                )?;
             }
             AttesterSub::Remove { address, source } => {
                 let contract_id = network_cfg
@@ -288,7 +386,15 @@ fn main() -> anyhow::Result<()> {
                     "remove_attester",
                     &["--attester", &address],
                 );
-                run_stellar(args)?;
+                run_audited(
+                    "attester remove",
+                    &cli.network,
+                    contract_id,
+                    "remove_attester",
+                    &[&address],
+                    source.as_deref(),
+                    args,
+                )?;
             }
         },
         Commands::Attestation { sub } => match sub {
@@ -409,6 +515,270 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// What a `deploy` invocation is actually allowed to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeployMode {
+    /// Builds WASM only, never touches a network.
+    BuildOnly,
+    /// Prints the plan, never touches a network.
+    DryRun,
+    /// Would submit transactions, so identity configuration is mandatory.
+    Live,
+}
+
+impl DeployMode {
+    fn new(build_only: bool, dry_run: bool) -> Self {
+        // build-only and dry-run are both offline; neither needs credentials.
+        if build_only {
+            DeployMode::BuildOnly
+        } else if dry_run {
+            DeployMode::DryRun
+        } else {
+            DeployMode::Live
+        }
+    }
+
+    fn requires_identity(self) -> bool {
+        matches!(self, DeployMode::Live)
+    }
+}
+
+/// Admin / source values resolved from flags then environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DeployIdentity {
+    admin: Option<String>,
+    source: Option<String>,
+}
+
+impl DeployIdentity {
+    /// Resolve and validate deployment identity.
+    ///
+    /// Flags win over environment. Outside dry-run/build-only a live deployment
+    /// refuses to start without both an admin address and a transaction source,
+    /// because a half-configured deployment leaves contracts uninitialized.
+    fn resolve(
+        admin_flag: Option<String>,
+        source_flag: Option<String>,
+        admin_env: Option<String>,
+        source_env: Option<String>,
+        mode: DeployMode,
+    ) -> anyhow::Result<Self> {
+        let admin = first_non_empty(admin_flag, admin_env);
+        let source = first_non_empty(source_flag, source_env);
+
+        if let Some(admin) = &admin {
+            validate_account_address("admin", admin)
+                .context("invalid --admin value (expected a G... account address)")?;
+        }
+        if let Some(source) = &source {
+            validate_source_account(source).context(
+                "invalid --source value (expected a stellar identity name or G... address)",
+            )?;
+        }
+
+        if mode.requires_identity() {
+            if source.is_none() {
+                anyhow::bail!(
+                    "deployment requires a transaction source: pass --source <identity> or set {ENV_SOURCE} (use --dry-run to preview without credentials)"
+                );
+            }
+            if admin.is_none() {
+                anyhow::bail!(
+                    "deployment requires an admin address: pass --admin <G...> or set {ENV_ADMIN} (use --dry-run to preview without credentials)"
+                );
+            }
+        }
+
+        Ok(Self { admin, source })
+    }
+}
+
+fn first_non_empty(primary: Option<String>, fallback: Option<String>) -> Option<String> {
+    primary
+        .into_iter()
+        .chain(fallback)
+        .map(|v| v.trim().to_string())
+        .find(|v| !v.is_empty())
+}
+
+/// Validate an optional `--source` before it reaches the stellar CLI.
+fn validated_source(source: Option<String>) -> anyhow::Result<Option<String>> {
+    match first_non_empty(source, None) {
+        Some(src) => {
+            validate_source_account(&src).context(
+                "invalid --source value (expected a stellar identity name or G... address)",
+            )?;
+            Ok(Some(src))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Build a `stellar contract invoke` argument list for the given network profile.
+fn invoke_args(
+    cfg: &NetworkConfig,
+    contract_id: &str,
+    source: Option<&str>,
+    function: &str,
+    function_args: &[&str],
+) -> Vec<String> {
+    let mut args = vec![
+        "contract".to_string(),
+        "invoke".to_string(),
+        "--id".to_string(),
+        contract_id.to_string(),
+        "--rpc-url".to_string(),
+        cfg.rpc_url.clone(),
+        "--network-passphrase".to_string(),
+        cfg.network_passphrase.clone(),
+    ];
+    if let Some(src) = source {
+        args.push("--source".to_string());
+        args.push(src.to_string());
+    }
+    args.push("--".to_string());
+    args.push(function.to_string());
+    args.extend(function_args.iter().map(|a| a.to_string()));
+    args
+}
+
+/// Print and run a stellar CLI invocation, failing loudly if it is unavailable.
+/// Run a mutating stellar CLI invocation and return the submitted
+/// transaction hash when the CLI reports one. Stderr is streamed through so
+/// the operator still sees progress.
+fn run_stellar(args: Vec<String>) -> anyhow::Result<Option<String>> {
+    tracing::info!(command = %format!("stellar {}", args.join(" ")), "invoking stellar CLI");
+    if which::which("stellar").is_err() {
+        anyhow::bail!("stellar CLI not found");
+    }
+    let started = std::time::Instant::now();
+    let mut child = std::process::Command::new("stellar")
+        .args(args)
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    let mut tx_hash = None;
+    if let Some(stderr) = child.stderr.take() {
+        for line in BufReader::new(stderr).lines() {
+            let line = line?;
+            eprintln!("{}", logging::redact(&line));
+            if tx_hash.is_none() && line.to_ascii_lowercase().contains("transaction") {
+                tx_hash = line
+                    .split(|c: char| !c.is_ascii_hexdigit())
+                    .find(|w| w.len() == 64)
+                    .map(str::to_string);
+            }
+        }
+    }
+    let status = child.wait()?;
+    tracing::info!(
+        latency_ms = started.elapsed().as_millis() as u64,
+        success = status.success(),
+        tx_hash = tx_hash.as_deref().unwrap_or(""),
+        "stellar CLI finished"
+    );
+    if !status.success() {
+        anyhow::bail!("stellar CLI failed");
+    }
+    Ok(tx_hash)
+}
+
+/// Run a mutating command inside a tracing span and append its outcome to
+/// the local audit log, whether it succeeded or failed.
+fn run_audited(
+    command: &str,
+    network: &str,
+    contract: &str,
+    function: &str,
+    call_args: &[&str],
+    signer: Option<&str>,
+    stellar_args: Vec<String>,
+) -> anyhow::Result<()> {
+    let span = tracing::info_span!("operation", command, network, contract, function);
+    let _entered = span.enter();
+    let result = run_stellar(stellar_args);
+    let outcome = match &result {
+        Ok(_) => "success".to_string(),
+        Err(e) => format!("failure: {e}"),
+    };
+    let op = audit::Operation {
+        command,
+        network,
+        contract,
+        function,
+        args: call_args,
+        signer,
+        tx_hash: result.as_ref().ok().and_then(|h| h.as_deref()),
+        outcome: &outcome,
+    };
+    let path = audit::default_path();
+    match audit::append(&path, &op) {
+        Ok(r) => tracing::info!(seq = r.seq, path = %path.display(), "audit record written"),
+        Err(e) => {
+            tracing::error!(error = %e, path = %path.display(), "failed to write audit record")
+        }
+    }
+    result.map(|_| ())
+}
+
+fn run_audit(sub: &AuditSub) -> anyhow::Result<()> {
+    let path = audit::default_path();
+    let records = audit::read_all(&path)?;
+    match sub {
+        AuditSub::Show => {
+            for r in &records {
+                println!("{}", serde_json::to_string(r)?);
+            }
+            if records.is_empty() {
+                eprintln!("no audit records in {}", path.display());
+            }
+        }
+        AuditSub::Verify => match audit::verify(&records) {
+            Ok(n) => println!("OK: {n} records verified in {}", path.display()),
+            Err(e) => anyhow::bail!("audit log {} is broken: {e}", path.display()),
+        },
+    }
+    Ok(())
+}
+
+/// Known address labels: deployed contracts from config plus `--label` flags.
+fn known_labels(cfg: &NetworkConfig, extra: &[String]) -> anyhow::Result<BTreeMap<String, String>> {
+    let mut labels = BTreeMap::new();
+    for (id, name) in [
+        (&cfg.contracts.attester_registry, "lafiya attester-registry"),
+        (
+            &cfg.contracts.attestation_registry,
+            "lafiya attestation-registry",
+        ),
+    ] {
+        if !id.is_empty() {
+            labels.insert(id.clone(), name.to_string());
+        }
+    }
+    for pair in extra {
+        let (addr, name) = pair
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("--label must be ADDRESS=NAME, got '{pair}'"))?;
+        labels.insert(addr.trim().to_string(), name.trim().to_string());
+    }
+    Ok(labels)
+}
+
+/// Human readable deployment state, including partially deployed profiles.
+fn deployment_summary(cfg: &NetworkConfig) -> String {
+    match cfg.deployment_state() {
+        DeploymentState::Deployed => "fully deployed".to_string(),
+        DeploymentState::NotDeployed => "not deployed".to_string(),
+        DeploymentState::Partial { missing } => {
+            let missing = missing
+                .iter()
+                .map(|k| k.key())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("PARTIALLY DEPLOYED - missing contract id(s): {missing}")
+        }
+    }
 }
 
 mod which {

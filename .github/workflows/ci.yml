@@ -51,6 +51,19 @@ jobs:
       - name: Run smoke-test.sh regression test
         run: bash scripts/smoke-test.test.sh
 
+  dashboard:
+    name: Dashboard generator + reproducibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Includes the reproducibility check: regenerates the site from the
+      # pinned synthetic ledger range and compares it with the committed output.
+      - run: python -m unittest discover -s dashboard -v
+      - run: git diff --exit-code dashboard/fixtures
+
   fmt:
     name: Format
     needs: changes

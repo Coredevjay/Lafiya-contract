@@ -20,7 +20,7 @@ pub use validation::{
 #[derive(Debug, Error)]
 #[allow(clippy::result_large_err)]
 pub enum ConfigError {
-    #[error("config/networks.toml not found at {path}")]
+    #[error("config/networks.toml not found at {0:?}")]
     NotFound(PathBuf),
     #[error("failed to read config {path}: {source}")]
     ReadError {
