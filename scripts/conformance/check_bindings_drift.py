@@ -26,7 +26,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from contracts import CONTRACTS
+from contracts import BINDINGS_CONTRACTS as CONTRACTS
 
 FUNCTION_RE = re.compile(r"^\s{2}(\w+):\s*\(.*?options\?: MethodOptions\)", re.MULTILINE)
 ERROR_RE = re.compile(r"^\s*(\d+):\s*\{message:\"(\w+)\"\}", re.MULTILINE)

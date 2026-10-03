@@ -1654,6 +1654,7 @@ name = "lafiya-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "hex",
  "lafiya-config",
@@ -1699,6 +1700,10 @@ version = "0.1.0"
 dependencies = [
  "soroban-sdk",
 ]
+
+[[package]]
+name = "lafiya-fraud-scoring"
+version = "0.1.0"
 
 [[package]]
 name = "lafiya-rpc-resilience"

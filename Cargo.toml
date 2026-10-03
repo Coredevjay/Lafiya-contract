@@ -11,6 +11,7 @@ members = [
     "crates/lafiya-contract-common",
     "crates/lafiya-rpc-resilience",
     "crates/lafiya-watchdog",
+    "crates/lafiya-fraud-scoring",
 ]
 
 [workspace.package]

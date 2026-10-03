@@ -33,6 +33,7 @@ check: fmt-check clippy test wasm
 bindings: wasm
 	stellar contract bindings typescript --wasm target/wasm32v1-none/release/attester_registry.wasm --output-dir bindings/attester-registry --overwrite
 	stellar contract bindings typescript --wasm target/wasm32v1-none/release/attestation_registry.wasm --output-dir bindings/attestation-registry --overwrite
+	stellar contract bindings typescript --wasm target/wasm32v1-none/release/multisig_account.wasm --output-dir bindings/multisig-account --overwrite
 
 conformance: wasm-contracts
 	python3 scripts/conformance/check_snapshot.py

@@ -23,4 +23,17 @@ CONTRACTS: dict[str, dict[str, pathlib.Path]] = {
     },
 }
 
+# Contracts whose committed TypeScript bindings are covered by
+# `check_bindings_drift.py`. A superset of CONTRACTS: multisig-account has
+# client bindings (for browser signer/admin flows) but is not yet covered by
+# the interface snapshot or error/event doc checks.
+BINDINGS_CONTRACTS = {
+    **CONTRACTS,
+    "multisig-account": {
+        "crate_dir": REPO_ROOT / "contracts" / "multisig-account",
+        "wasm_path": WASM_DIR / "multisig_account.wasm",
+        "bindings_dir": REPO_ROOT / "bindings" / "multisig-account",
+    },
+}
+
 SNAPSHOT_DIR = pathlib.Path(__file__).resolve().parent / "snapshots"

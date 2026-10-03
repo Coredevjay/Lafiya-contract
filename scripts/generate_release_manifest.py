@@ -177,39 +177,69 @@ def build_events(previous_manifest: Json | None) -> list[Json]:
     return events
 
 
+def latest_ledger_records(network_name: str) -> dict[str, Json]:
+    """The most recent deployments/<network>.jsonl record per contract_id, or
+    {} if the ledger doesn't exist yet (e.g. local/standalone, or a network
+    that predates the ledger -- see deployments/README.md and issue #409)."""
+    ledger_path = ROOT / "deployments" / f"{network_name}.jsonl"
+    if not ledger_path.is_file():
+        return {}
+    latest: dict[str, Json] = {}
+    for line in ledger_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        record = json.loads(line)
+        latest[record["contract_id"]] = record
+    return latest
+
+
 def build_deployments(contracts_by_name: dict[str, Json]) -> list[Json]:
     networks_toml = ROOT / "config" / "networks.toml"
     with open(networks_toml, "rb") as f:
         networks = tomllib.load(f)
     deployments: list[Json] = []
     for network_name, network in networks.items():
+        ledger = latest_ledger_records(network_name)
         for contract_name, contract_id in network.get("contracts", {}).items():
             # networks.toml uses snake_case keys; manifest contract names are
             # kebab-case to match crates/ and bindings/ directory names.
             name = contract_name.replace("_", "-")
             contract = contracts_by_name.get(name)
-            deployments.append(
-                {
-                    "network": network_name,
-                    "contract": name,
-                    "contract_id": contract_id or None,
-                    # networks.toml only records the current contract ID, not
-                    # the wasm hash or when it was deployed — see ADR-0010
-                    # Follow-up for the proposed append-only deployment ledger
-                    # that would let this be populated automatically.
-                    "wasm_sha256": None,
-                    "storage_schema_version": contract["storage_schema_version"]
-                    if contract
-                    else None,
-                    "deployed_at": None,
-                    "upgrade_tx": None,
-                    "previous_wasm_sha256": None,
-                    "status": "deployed" if contract_id else "not_deployed",
-                    "source": (
-                        "config/networks.toml (current pointer only, no historical ledger yet)"
-                    ),
-                }
-            )
+            record = ledger.get(contract_id) if contract_id else None
+            if record is not None:
+                deployments.append(
+                    {
+                        "network": network_name,
+                        "contract": name,
+                        "contract_id": contract_id,
+                        "wasm_sha256": record.get("wasm_sha256"),
+                        "storage_schema_version": contract["storage_schema_version"] if contract else None,
+                        "deployed_at": record.get("timestamp"),
+                        "upgrade_tx": record.get("tx_hash"),
+                        "previous_wasm_sha256": record.get("previous_wasm_sha256"),
+                        "status": "deployed",
+                        "source": f"deployments/{network_name}.jsonl (latest {record.get('event')} record)",
+                    }
+                )
+            else:
+                deployments.append(
+                    {
+                        "network": network_name,
+                        "contract": name,
+                        "contract_id": contract_id or None,
+                        # No ledger record for this contract_id yet -- either
+                        # it's not deployed, or it was deployed before
+                        # deployments/<network>.jsonl existed. See issue #409.
+                        "wasm_sha256": None,
+                        "storage_schema_version": contract["storage_schema_version"] if contract else None,
+                        "deployed_at": None,
+                        "upgrade_tx": None,
+                        "previous_wasm_sha256": None,
+                        "status": "deployed" if contract_id else "not_deployed",
+                        "source": "config/networks.toml (current pointer only; no deployments/*.jsonl record found)",
+                    }
+                )
     return deployments
 
 

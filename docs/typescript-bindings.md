@@ -11,10 +11,20 @@ make bindings
 ```
 
 This runs:
-1. `make wasm` to build both contracts to `target/wasm32v1-none/release/`.
+1. `make wasm` to build the contracts to `target/wasm32v1-none/release/`.
 2. `stellar contract bindings typescript` to output the generated TS clients to:
    - `bindings/attester-registry`
    - `bindings/attestation-registry`
+   - `bindings/multisig-account`
+
+`bindings/multisig-account` covers the contract's data types (`Signature`,
+`Errors`) but, being an account contract, has no state-changing methods of
+its own to call. Building and submitting a `__check_auth`-authorized call is
+covered instead by [`@lafiya/multisig-auth`](../packages/multisig-auth), a
+hand-maintained helper package (not generated) for computing the signature
+payload and encoding N-of-M signatures in the shape the contract expects.
+`scripts/conformance/check_bindings_drift.py` covers `multisig-account`'s
+bindings the same way it does the other two contracts.
 
 ## Publishing & Consumption Strategy
 
