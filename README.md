@@ -105,6 +105,7 @@ Three Soroban contracts, each in its own crate under `contracts/`.
 | `add_attester_with_info(attester: Address, license_hash: Option<BytesN<32>>, region: Option<Symbol>)` | Allowlists `attester` with optional metadata. Requires admin auth. Blocked while paused (`Error::ContractPaused`). Emits `AttesterAdded`. |
 | `update_attester_info(attester: Address, license_hash: Option<BytesN<32>>, region: Option<Symbol>)` | Updates metadata for an already-allowlisted `attester`. Requires admin auth. Blocked while paused (`Error::ContractPaused`). Fails with `Error::AttesterNotFound` if `attester` isn't currently allowlisted. Emits `AttesterInfoUpdated`, distinguishable from enrollment's `AttesterAdded`. |
 | `remove_attester(attester: Address)` | Removes `attester` from the allowlist. Requires admin auth. Blocked while paused (`Error::ContractPaused`). Emits `AttesterRemoved`. |
+| `revoke_attester(attester: Address)` | Allows an attester to revoke its own key by authorizing as `attester`. Removes it from the allowlist, clears suspension state, and decrements the count. Available while paused. Emits `AttesterRevoked`. |
 | `is_attester(attester: Address) -> bool` | Whether `attester` is currently allowlisted (and not suspended). Open to any caller, including other contracts. Callable while paused. |
 | `get_attester_info(attester: Address) -> Option<AttesterInfo>` | Returns stored metadata for an allowlisted attester. Callable while paused. |
 | `get_attester_status(attester: Address) -> Option<AttesterStatus>` | Returns `attester`'s metadata together with its current suspension state in one call. `None` if `attester` isn't currently allowlisted (never added, or since removed). Callable while paused. |
@@ -113,7 +114,7 @@ Three Soroban contracts, each in its own crate under `contracts/`.
 | `set_max_attesters(max_attesters: u32)` | Sets the soft cap on the number of allowlisted attesters. Requires admin auth. Does not evict existing attesters if lowered below the current count. |
 | `get_max_attesters() -> u32` | The current soft cap on the number of allowlisted attesters. |
 | `get_attester_count() -> u32` | The current number of allowlisted attesters. |
-| `pause()` | Blocks `add_attester`, `add_attester_with_info`, `remove_attester`, `suspend_attester`, and `reinstate_attester` until unpaused. Requires admin auth. Emits `Paused`. |
+| `pause()` | Blocks `add_attester`, `add_attester_with_info`, `remove_attester`, `suspend_attester`, and `reinstate_attester` until unpaused. Self-revocation remains available while paused. Requires admin auth. Emits `Paused`. |
 | `unpause()` | Restores normal operation after `pause`. Requires admin auth. Emits `Unpaused`. |
 | `is_paused() -> bool` | Whether the contract is currently paused. Callable while paused. |
 | `get_schema_version() -> u32` | Storage schema version recorded for the instance. Open to any caller. |

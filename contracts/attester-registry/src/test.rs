@@ -87,7 +87,15 @@ fn add_attester_allowlists_and_emits_event() {
     };
     assert_eq!(
         env.events().all(),
-        std::vec![expected_event.to_xdr(&env, &client.address)],
+        std::vec![
+            AdminTransferProposed {
+                current_admin: admin.clone(),
+                proposed_admin: new_admin.clone(),
+                expires_at: 30 * 24 * 60 * 60,
+            }
+            .to_xdr(&env, &client.address),
+            expected_event.to_xdr(&env, &client.address)
+        ],
     );
 
     assert!(client.is_attester(&attester));
@@ -114,6 +122,70 @@ fn remove_attester_never_added_is_a_no_op() {
     let attester = Address::generate(&env);
     client.remove_attester(&attester);
     assert!(!client.is_attester(&attester));
+}
+
+#[test]
+fn attester_can_revoke_own_key_and_emits_event() {
+    let (env, client, admin) = setup();
+    client.initialize(&admin);
+
+    let attester = Address::generate(&env);
+    client.add_attester(&attester);
+    assert_eq!(client.get_attester_count(), 1);
+
+    client.revoke_attester(&attester);
+
+    assert!(!client.is_attester(&attester));
+    assert_eq!(client.get_attester_info(&attester), None);
+    assert_eq!(client.get_attester_status(&attester), None);
+    assert_eq!(client.get_attester_count(), 0);
+    assert_eq!(
+        env.events().all(),
+        std::vec![
+            AttesterAdded {
+                attester: attester.clone(),
+            }
+            .to_xdr(&env, &client.address),
+            AttesterRevoked { attester }.to_xdr(&env, &client.address),
+        ],
+    );
+}
+
+#[test]
+fn revoking_unknown_or_already_revoked_attester_is_idempotent() {
+    let (env, client, admin) = setup();
+    client.initialize(&admin);
+
+    let attester = Address::generate(&env);
+    client.revoke_attester(&attester);
+    client.revoke_attester(&attester);
+
+    assert_eq!(client.get_attester_count(), 0);
+    assert_eq!(
+        env.events().all(),
+        std::vec![
+            AttesterRevoked {
+                attester: attester.clone(),
+            }
+            .to_xdr(&env, &client.address),
+            AttesterRevoked { attester }.to_xdr(&env, &client.address),
+        ],
+    );
+}
+
+#[test]
+fn attester_can_revoke_own_key_while_paused() {
+    let (env, client, admin) = setup();
+    client.initialize(&admin);
+
+    let attester = Address::generate(&env);
+    client.add_attester(&attester);
+    client.pause();
+
+    client.revoke_attester(&attester);
+
+    assert!(!client.is_attester(&attester));
+    assert_eq!(client.get_attester_count(), 0);
 }
 
 #[test]

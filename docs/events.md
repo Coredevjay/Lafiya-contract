@@ -120,6 +120,15 @@ for how these events are consumed.
 |---|---|---|
 | `attester` | `Address` | topic_list |
 
+### `AttesterRevoked`
+
+- **Prefix topics:** `attester_revoked`
+- **Data format:** `map`
+
+| Field | Type | Location |
+|---|---|---|
+| `attester` | `Address` | topic_list |
+
 ### `AttesterSuspended`
 
 - **Prefix topics:** `attester_suspended`

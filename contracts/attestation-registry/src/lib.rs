@@ -17,10 +17,32 @@ pub trait AttesterRegistryInterface {
     fn is_attester(env: Env, attester: Address) -> bool;
 }
 
+/// Emitted when the current admin nominates a successor.
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct AdminTransferProposed {
+    #[topic]
+    pub current_admin: Address,
+    #[topic]
+    pub proposed_admin: Address,
+    pub expires_at: u64,
+}
+
+/// Emitted when a pending admin transfer is cancelled.
+#[contractevent]
+#[derive(Clone, Debug)]
+pub struct AdminTransferCancelled {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub proposed_admin: Address,
+}
+
 /// Maximum number of historical attestations to keep per record hash.
 /// This bounds storage growth per re-attestation. When exceeded,
 /// the oldest attestation is removed (FIFO eviction).
 const MAX_HISTORY: u64 = 10;
+const ADMIN_PROPOSAL_TTL_SECONDS: u64 = 30 * 24 * 60 * 60;
 
 const SCHEMA_VERSION: u32 = 1;
 
@@ -56,6 +78,8 @@ enum DataKey {
     SchemaVersion,
     /// Whether state-changing operations are currently paused.
     Paused,
+    /// Ledger timestamp at which the pending admin proposal expires.
+    PendingAdminExpiresAt,
 }
 
 /// A single attestation: proof that `attester` verified the off-chain
@@ -152,6 +176,10 @@ pub enum Error {
     AttestationNotFound = 6,
     /// The requested operation is blocked while the contract is paused.
     ContractPaused = 7,
+    /// The proposed admin address is not a valid successor.
+    InvalidAdminProposal = 8,
+    /// The pending admin proposal has expired.
+    ProposalExpired = 9,
 }
 
 /// The attestation registry contract.
@@ -199,6 +227,27 @@ impl AttestationRegistry {
         Ok(())
     }
 
+    /// Cancel the pending admin transfer. Requires the current admin's authorization.
+    pub fn cancel_admin_proposal(env: Env) -> Result<(), Error> {
+        let admin = Self::admin(&env)?;
+        admin.require_auth();
+        let proposed_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .ok_or(Error::NoPendingTransfer)?;
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminExpiresAt);
+        AdminTransferCancelled {
+            admin,
+            proposed_admin,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
     /// Return the current admin address.
     pub fn get_admin(env: Env) -> Result<Address, Error> {
         Self::admin(&env)
@@ -213,9 +262,29 @@ impl AttestationRegistry {
     pub fn propose_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         let current_admin = Self::admin(&env)?;
         current_admin.require_auth();
+        let current_registry = Self::attester_registry(&env)?;
+        if new_admin == current_admin
+            || new_admin == env.current_contract_address()
+            || new_admin == current_registry
+        {
+            return Err(Error::InvalidAdminProposal);
+        }
+        let expires_at = env
+            .ledger()
+            .timestamp()
+            .saturating_add(ADMIN_PROPOSAL_TTL_SECONDS);
         env.storage()
             .instance()
             .set(&DataKey::PendingAdmin, &new_admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdminExpiresAt, &expires_at);
+        AdminTransferProposed {
+            current_admin,
+            proposed_admin: new_admin,
+            expires_at,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -227,6 +296,18 @@ impl AttestationRegistry {
             .instance()
             .get(&DataKey::PendingAdmin)
             .ok_or(Error::NoPendingTransfer)?;
+        let expires_at: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdminExpiresAt)
+            .unwrap_or(0);
+        if env.ledger().timestamp() > expires_at {
+            env.storage().instance().remove(&DataKey::PendingAdmin);
+            env.storage()
+                .instance()
+                .remove(&DataKey::PendingAdminExpiresAt);
+            return Err(Error::ProposalExpired);
+        }
 
         pending_admin.require_auth();
 
@@ -234,6 +315,9 @@ impl AttestationRegistry {
             .instance()
             .set(&DataKey::Admin, &pending_admin);
         env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminExpiresAt);
 
         AdminTransferred {
             previous_admin,
