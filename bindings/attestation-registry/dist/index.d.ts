@@ -4,9 +4,7 @@ import type { u64, Option } from "@stellar/stellar-sdk/contract";
 export * from "@stellar/stellar-sdk";
 export * as contract from "@stellar/stellar-sdk/contract";
 export * as rpc from "@stellar/stellar-sdk/rpc";
-/**
- * Errors returned by the attestation registry's public entry points.
- */
+export * from "./record.js";
 export declare const Errors: {
     /**
      * `initialize` has not been called yet.
