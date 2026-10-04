@@ -59,6 +59,30 @@ python3 scripts/validate_release_manifest.py release-manifest.json
 `.github/workflows/release-manifest.yml` is a prototype CI workflow that does this on
 every `v*.*.*` tag; see ADR-0010 "Follow-up" for what remains before it is load-bearing.
 
+## Interface Version and Runtime Negotiation
+
+Every contract exposes `get_interface() -> InterfaceInfo` with its `contract_kind`,
+`interface_version`, enabled `features`, `schema_version`, and `event_version`. The
+values are constants in each `contracts/*/src/lib.rs` (`CONTRACT_KIND`,
+`INTERFACE_VERSION`, `FEATURES`, `EVENT_VERSION`).
+
+- **Bump `INTERFACE_VERSION`** on any breaking public ABI change (a removed or changed
+  function, error, event, or type). Adding an entry is not breaking.
+- `scripts/conformance/check_snapshot.py` records the version next to each snapshot in
+  `snapshots/interface_versions.json`. `make conformance` fails if the constant and the
+  recorded version disagree, and `make conformance-update` refuses a breaking snapshot
+  change without a bump.
+- Clients call `get_interface()` once per session and refuse to operate if the kind or
+  version is wrong, rather than probing calls. For example:
+
+  ```bash
+  lafiya-cli --network testnet interface attester
+  # error: contract CDX… is interface v1; this CLI requires >= v3
+  ```
+
+  A contract that predates `get_interface` is reported as interface v0. `contract_kind`
+  is a weak identity check when wiring contracts, not proof of authenticity.
+
 ---
 
 ## Testnet & Mainnet Redeployment
