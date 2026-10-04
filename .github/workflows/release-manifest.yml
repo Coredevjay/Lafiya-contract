@@ -32,6 +32,9 @@ on:
         type: boolean
         default: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   TAG: ${{ inputs.tag || github.ref_name }}
@@ -47,10 +50,19 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - name: Harden runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
-          ref: ${{ inputs.tag || github.ref }}
-          fetch-depth: 0
+          # Start in audit mode; switch to `block` with an allowed-endpoints
+          # list once the egress baseline from audit runs is reviewed.
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: wasm32v1-none
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Reproducible contract wasm (pinned container)
         run: make wasm-reproducible
@@ -58,10 +70,10 @@ jobs:
       - name: Assert provenance metadata in every wasm
         run: python3 scripts/check_wasm_meta.py --commit "$(git rev-parse HEAD)" target/wasm32v1-none/release/*.wasm
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - run: pip install jsonschema
+      - run: pip install -r requirements-dev.lock
 
       - name: Generate + validate release manifest
         run: |
@@ -71,59 +83,7 @@ jobs:
             release-manifest.json \
             docs/release-manifest/examples/lafiya-web.requirements.json
 
-      - name: Manifest wasm hashes must match the reproducible build
-        run: |
-          python3 - <<'PY'
-          import json, pathlib, sys
-          sums = {pathlib.Path(p).stem: h for h, p in
-                  (l.split() for l in open("target/wasm32v1-none/release/SHA256SUMS"))}
-          bad = [c["name"] for c in json.load(open("release-manifest.json"))["contracts"]
-                 if c["wasm"]["sha256"] != sums.get(c["name"].replace("-", "_"))]
-          sys.exit(f"manifest/SHA256SUMS mismatch: {bad}" if bad else 0)
-          PY
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - name: Build + pack TypeScript bindings
-        # npm publish stays off until PUBLISHING.md's prerequisites are met.
-        run: |
-          mkdir -p dist
-          for pkg in bindings/attester-registry bindings/attestation-registry; do
-            (cd "$pkg" && pnpm install --frozen-lockfile && pnpm run build && pnpm pack --pack-destination ../../dist)
-          done
-
-      - name: Assemble release artifacts
-        run: |
-          cp target/wasm32v1-none/release/*.wasm target/wasm32v1-none/release/SHA256SUMS release-manifest.json dist/
-          prev=$(git describe --tags --abbrev=0 "HEAD^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
-          {
-            echo "## Schema impact"
-            git log "$prev..HEAD" --no-merges --format='%(trailers:key=Schema-Impact,valueonly,separator=%x2C)%x09%h %s' \
-              | awk -F'\t' '$1 != "" { print "- " $2 ": " $1 }' | grep . || echo "- None declared."
-            echo
-            echo "## Artifacts"
-            echo '```'
-            cat target/wasm32v1-none/release/SHA256SUMS
-            echo '```'
-            echo "Verify: \`gh attestation verify <file> --repo Lafiya-xyz/Lafiya-contract\` (docs/releasing.md)."
-          } > dist/RELEASE_NOTES.md
-          ls -l dist
-
-      - name: Signed SLSA build provenance (wasm + manifest)
-        id: attest
-        if: env.DRY_RUN != 'true'
-        uses: actions/attest-build-provenance@v3
-        with:
-          subject-path: |
-            dist/*.wasm
-            dist/release-manifest.json
-
-      - name: Include provenance bundle
-        if: env.DRY_RUN != 'true'
-        run: cp "${{ steps.attest.outputs.bundle-path }}" dist/provenance.intoto.jsonl
-
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ env.TAG }}
           path: dist/

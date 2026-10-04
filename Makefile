@@ -1,4 +1,4 @@
-.PHONY: build test fmt fmt-check clippy wasm wasm-contracts wasm-reproducible check clean config-check config-list deploy bench conformance conformance-update
+.PHONY: build test fmt fmt-check clippy wasm wasm-contracts check clean config-check config-list deploy bench conformance conformance-update audit-env
 
 # Compatibility shim: these targets delegate to `cargo xtask` (CONTRIBUTING.md)
 # and will be removed after the next release.
@@ -18,7 +18,7 @@ clippy:
 	cargo xtask clippy
 
 wasm:
-	cargo build --workspace --release --target wasm32v1-none
+	cargo build -p attester-registry -p attestation-registry -p multisig-account --release --target wasm32v1-none
 
 # Builds only the Soroban contract crates for wasm32v1-none. Unlike `wasm`,
 # this doesn't try (and fail) to cross-compile the std-only workspace
@@ -39,23 +39,34 @@ wasm-reproducible:
 			s=$$?; chown -R $(shell id -u):$(shell id -g) target; exit $$s'
 	sha256sum target/wasm32v1-none/release/*.wasm | tee target/wasm32v1-none/release/SHA256SUMS
 
-test-integration: wasm
+test-integration: wasm-contracts
 	./tests/integration/run.sh
 
-check:
-	cargo xtask check
+check: fmt-check clippy test wasm-contracts
 
-bindings:
-	cargo xtask bindings
+bindings: wasm
+	stellar contract bindings typescript --wasm target/wasm32v1-none/release/attester_registry.wasm --output-dir bindings/attester-registry --overwrite
+	stellar contract bindings typescript --wasm target/wasm32v1-none/release/attestation_registry.wasm --output-dir bindings/attestation-registry --overwrite
+	stellar contract bindings typescript --wasm target/wasm32v1-none/release/multisig_account.wasm --output-dir bindings/multisig-account --overwrite
 
-conformance:
-	cargo xtask conformance
+conformance: wasm-contracts
+	python3 scripts/conformance/check_snapshot.py
+	python3 scripts/conformance/check_error_docs.py
+	python3 scripts/conformance/check_web_error_mapping.py
+	python3 scripts/conformance/gen_events_doc.py --check
+	python3 scripts/conformance/gen_catalog.py --check
+	python3 scripts/conformance/check_bindings_drift.py
 
-conformance-update:
-	cargo xtask conformance --update
+conformance-update: wasm-contracts
+	python3 scripts/conformance/check_snapshot.py --update
+	python3 scripts/conformance/gen_events_doc.py
+	python3 scripts/conformance/gen_catalog.py
 
 clean:
 	cargo clean
+
+audit-env:
+	./scripts/audit-env.sh $(if $(DEPLOY),--deploy)
 
 bench:
 	cargo xtask budgets

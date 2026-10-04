@@ -10,13 +10,8 @@ updates:
           - "soroban-sdk"
           - "soroban-*"
 
-  # Bumps the exact channel pinned in rust-toolchain.toml. When merging one,
-  # also update REPRODUCIBLE_IMAGE in the Makefile to the matching rust image.
-  - package-ecosystem: "rust-toolchain"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-
+  # Actions are pinned by full commit SHA with a "# vX.Y.Z" comment;
+  # Dependabot bumps both the SHA and the comment.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
