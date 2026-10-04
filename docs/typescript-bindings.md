@@ -39,4 +39,4 @@ See [`PUBLISHING.md`](../PUBLISHING.md) for the canonical, up-to-date strategy. 
      - Standard workspace/monorepo references if they are brought into a monorepo setup in the future.
 
 2. **NPM Registry Publishing (Secondary, planned, not yet live):**
-   - Once `bindings/*/package.json` are scoped under `@lafiya` and given a `publishConfig`, a GitHub Action can pack and publish the generated `bindings/` to the npm registry whenever a release tag is pushed, coordinated with [ADR-0009](adr/0009-release-manifest-and-compatibility.md)'s release manifest.
+   - Once `bindings/*/package.json` are scoped under `@lafiya` and given a `publishConfig`, a GitHub Action can pack and publish the generated `bindings/` to the npm registry whenever a release tag is pushed, coordinated with [ADR-0010](adr/0010-release-manifest-and-compatibility.md)'s release manifest.
