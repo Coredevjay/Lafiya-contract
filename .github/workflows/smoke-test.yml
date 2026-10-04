@@ -1,6 +1,23 @@
 name: Smoke Test
 
+# Secrets are never accepted as workflow inputs (dispatch inputs are stored in
+# the run's event payload). The admin key comes from the `testnet` GitHub
+# Environment secret TESTNET_DEPLOYER_SECRET; see docs/runbooks/testnet-deployment.md.
 on:
+  workflow_call:
+    inputs:
+      att_registry:
+        required: true
+        type: string
+      attester_registry:
+        required: true
+        type: string
+      network_url:
+        required: true
+        type: string
+    secrets:
+      TESTNET_DEPLOYER_SECRET:
+        required: false
   workflow_dispatch:
     inputs:
       att_registry:
@@ -15,21 +32,18 @@ on:
         description: 'Horizon URL for the target testnet'
         required: true
         type: string
-      admin_secret:
-        description: 'Secret key of admin account'
-        required: true
-        type: string
 
 jobs:
   smoke-test:
     runs-on: ubuntu-latest
+    environment: testnet
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - name: Validate network_url input
         env:
-          NETWORK_URL: ${{ github.event.inputs.network_url }}
+          NETWORK_URL: ${{ inputs.network_url }}
         run: |
           if ! grep -Fq "\"$NETWORK_URL\"" <(grep '^rpc_url' config/networks.toml); then
             echo "::error::network_url '$NETWORK_URL' does not match any rpc_url defined in config/networks.toml"
@@ -54,15 +68,12 @@ jobs:
           sudo mv stellar-cli /usr/local/bin/
           stellar-cli version
 
-      - name: Mask admin secret
-        run: echo "::add-mask::${{ inputs.admin_secret }}"
-
       - name: Run smoke test script
         env:
-          ATT_REGISTRY: ${{ github.event.inputs.att_registry }}
-          ATTESTER_REGISTRY: ${{ github.event.inputs.attester_registry }}
-          NETWORK_URL: ${{ github.event.inputs.network_url }}
-          ADMIN_SECRET: ${{ github.event.inputs.admin_secret }}
+          ATT_REGISTRY: ${{ inputs.att_registry }}
+          ATTESTER_REGISTRY: ${{ inputs.attester_registry }}
+          NETWORK_URL: ${{ inputs.network_url }}
+          ADMIN_SECRET: ${{ secrets.TESTNET_DEPLOYER_SECRET }}
         run: |
           chmod +x scripts/smoke-test.sh
           ./scripts/smoke-test.sh

@@ -34,6 +34,8 @@ incentive_pool = ""
 rpc_url = "https://soroban-testnet.stellar.org"
 network_passphrase = "Test SDF Network ; September 2015"
 # SDF Public Testnet
+# Testnet contract IDs are rewritten automatically after an SDF testnet reset;
+# see docs/runbooks/testnet-reset.md.
 
 [testnet.contracts]
 attester_registry = ""
