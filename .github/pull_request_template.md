@@ -13,6 +13,13 @@
 - [ ] I have added unit tests covering success, failure, and authorization cases
 - [ ] I have commented my code, particularly in hard-to-understand areas
 - [ ] I have updated the documentation / README if applicable
+- [ ] **Does this change affect the threat model?** If yes, I have updated [docs/security/threat-model.md](../docs/security/threat-model.md)
+
+## Breaking change?
+<!-- See docs/stability-policy.md for what counts as breaking on each surface. -->
+- [ ] **Does this PR break or deprecate a public surface?** (contract functions, storage, events, error codes, TS bindings, CLI, or commitment scheme)
+  - If yes, which surface, and does the change respect its deprecation window in [docs/stability-policy.md](../docs/stability-policy.md)?
+  - *Migration path for consumers:* 
 
 ## Cross-Repo & Shared-Contract Impact
 - [ ] **Does this PR change a shared contract interface?** (e.g., attestation schema, public contract function signatures, events emitted)

@@ -1,4 +1,4 @@
-.PHONY: build test fmt fmt-check clippy wasm wasm-contracts check clean config-check config-list deploy bench conformance conformance-update
+.PHONY: build test fmt fmt-check clippy wasm wasm-contracts check clean config-check config-list deploy bench conformance conformance-update audit-env
 
 build:
 	cargo build --workspace
@@ -16,7 +16,7 @@ clippy:
 	cargo clippy --workspace --all-targets -- -D warnings
 
 wasm:
-	cargo build --workspace --release --target wasm32v1-none
+	cargo build -p attester-registry -p attestation-registry -p multisig-account --release --target wasm32v1-none
 
 # Builds only the Soroban contract crates for wasm32v1-none. Unlike `wasm`,
 # this doesn't try (and fail) to cross-compile the std-only workspace
@@ -25,27 +25,34 @@ wasm:
 wasm-contracts:
 	cargo build --release --locked --target wasm32v1-none -p multisig-account -p attester-registry -p attestation-registry
 
-test-integration: wasm
+test-integration: wasm-contracts
 	./tests/integration/run.sh
 
-check: fmt-check clippy test wasm
+check: fmt-check clippy test wasm-contracts
 
 bindings: wasm
 	stellar contract bindings typescript --wasm target/wasm32v1-none/release/attester_registry.wasm --output-dir bindings/attester-registry --overwrite
 	stellar contract bindings typescript --wasm target/wasm32v1-none/release/attestation_registry.wasm --output-dir bindings/attestation-registry --overwrite
+	stellar contract bindings typescript --wasm target/wasm32v1-none/release/multisig_account.wasm --output-dir bindings/multisig-account --overwrite
 
 conformance: wasm-contracts
 	python3 scripts/conformance/check_snapshot.py
 	python3 scripts/conformance/check_error_docs.py
+	python3 scripts/conformance/check_web_error_mapping.py
 	python3 scripts/conformance/gen_events_doc.py --check
+	python3 scripts/conformance/gen_catalog.py --check
 	python3 scripts/conformance/check_bindings_drift.py
 
 conformance-update: wasm-contracts
 	python3 scripts/conformance/check_snapshot.py --update
 	python3 scripts/conformance/gen_events_doc.py
+	python3 scripts/conformance/gen_catalog.py
 
 clean:
 	cargo clean
+
+audit-env:
+	./scripts/audit-env.sh $(if $(DEPLOY),--deploy)
 
 bench:
 	cargo test -p attester-registry large_attester_allowlist_load -- --nocapture
